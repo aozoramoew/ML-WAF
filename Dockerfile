@@ -9,11 +9,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application code
 COPY . .
 
-# Expose the API port
+# Expose the API port (hint only — actual port comes from $PORT at runtime)
 EXPOSE 8000
 
 # Set production environment variables
-ENV ENVIRONMENT=production
+ENV ENVIRONMENT=production \
+    PORT=8000
 
-# Run the FastAPI server bound to all interfaces
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form so $PORT is expanded at container runtime.
+# Hosting platforms (Railway, Render, Fly.io, etc.) inject PORT automatically.
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
