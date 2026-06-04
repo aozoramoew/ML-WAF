@@ -846,9 +846,9 @@ async def list_integrations():
 async def health():
     """Health check endpoint for integration clients and load balancers."""
     return {
-        'status': 'healthy',
+        'status': 'ready' if _app_ready else 'starting',
         'version': '2.0.0',
-        'model_loaded': waf_engine.get_model() is not None,
+        'model_loaded': waf_engine.is_model_loaded(),
         'uptime': time.time(),
     }
 
@@ -883,13 +883,22 @@ async def websocket_endpoint(ws: WebSocket):
 
 
 # ── Startup ────────────────────────────────────────────────────────────────────
+_app_ready = False  # Set to True once model + policy are loaded
+
 @app.on_event('startup')
 async def startup():
+    global _app_ready
+    import asyncio
+    loop = asyncio.get_event_loop()
+
     print('\n' + '=' * 65)
     print('  ML-WAF v2.0 — open-appsec clone — Starting up')
     print('=' * 65)
+
+    # Load model in thread pool so the async event loop stays responsive.
+    # This prevents the 1.7 MB GBT pickle from blocking health-check probes.
     try:
-        waf_engine.get_model()
+        await loop.run_in_executor(None, waf_engine.get_model)
     except Exception as e:
         print(f'  Model load warning: {e}')
 
@@ -904,6 +913,7 @@ async def startup():
     print(f'  Dashboard: http://localhost:8000')
     print(f'  API Docs:  http://localhost:8000/docs')
     print('=' * 65 + '\n')
+    _app_ready = True
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

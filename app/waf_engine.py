@@ -57,6 +57,18 @@ def get_model():
         _load_model()
     return _model
 
+def is_model_loaded() -> bool:
+    """Returns True if the model is currently loaded in memory."""
+    return _model is not None
+
+def load_models():
+    """Public hot-reload: forces a fresh load of the .pkl model from disk.
+    Called by the /ml/retrain endpoint after background training completes."""
+    global _model, _metrics
+    _model = None
+    _metrics = {}
+    _load_model()
+
 def get_metrics() -> dict:
     if not _metrics:
         _load_model()
