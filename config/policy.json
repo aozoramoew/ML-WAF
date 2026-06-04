@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "mode": "prevent",
+  "rules": {
+    "ip_allowlist": [],
+    "ip_blocklist": [],
+    "path_allowlist": [],
+    "path_blocklist": [],
+    "custom": []
+  },
+  "thresholds": {
+    "ml_block_score": 0.5,
+    "unsupervised_block_score": 0.75,
+    "combined_block_score": 0.65
+  },
+  "rate_limits": {
+    "default_rpm": 120,
+    "burst_limit": 30
+  }
+}

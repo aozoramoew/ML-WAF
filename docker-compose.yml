@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  ml-waf:
+    build: .
+    container_name: ml-waf
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      # - RATE_LIMIT_REQUESTS=100
+      # - RATE_LIMIT_WINDOW_SECONDS=60
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models

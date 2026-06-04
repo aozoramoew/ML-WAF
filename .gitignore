@@ -1,0 +1,83 @@
+# ── Secrets ──────────────────────────────────────────────────────────────────
+.env
+*.env
+.env.local
+.env.production
+.env.staging
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+.eggs/
+
+# ── Virtual environments ─────────────────────────────────────────────────────
+venv/
+env/
+.venv/
+.env/
+ENV/
+env.bak/
+venv.bak/
+
+# ── Trained models (large binary files — retrain on deploy) ──────────────────
+# Uncomment these if you do NOT want to commit the trained model to git.
+# If you want to ship a pre-trained model, keep them commented out.
+# models/waf_model.pkl
+# models/baseline.pkl
+
+# ── Datasets (download separately — see .env.example) ────────────────────────
+data/normalTrafficTraining.txt
+data/anomalousTrafficTest.txt
+data/*.txt
+data/*.csv
+data/*.arff
+
+# ── IDE / editor ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Testing & coverage ───────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Jupyter ──────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Docker ───────────────────────────────────────────────────────────────────
+# (docker-compose.yml and Dockerfile ARE committed — they're not secrets)
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+*.bak
+*.tmp
+.cache/
