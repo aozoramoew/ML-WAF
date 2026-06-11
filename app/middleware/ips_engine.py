@@ -9,6 +9,7 @@ Covers:
   - Spring4Shell    CVE-2022-22965
   - Shellshock      CVE-2014-6271
   - HeartBleed hint CVE-2014-0160
+  - Text4Shell      CVE-2022-42889
   - Struts2 RCE     CVE-2017-5638
   - PHP CGI         CVE-2012-1823
   - Apache path     CVE-2021-41773
@@ -36,6 +37,10 @@ _RAW_SIGNATURES: List[Tuple[str, str, str, str, str]] = [
     # Spring4Shell
     ('CVE-2022-22965', 'Spring4Shell class.module.classLoader',
      r'class\.module\.classLoader', 'critical', 'any'),
+
+    # Text4Shell
+    ('CVE-2022-42889', 'Text4Shell Apache Commons Text interpolation',
+     r'\$\{(script|dns|url|base64decoder|urlencode|urldecode):', 'critical', 'any'),
 
     # Shellshock
     ('CVE-2014-6271', 'Shellshock bash function definition',

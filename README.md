@@ -133,7 +133,7 @@ ML-WAF/
 ├── models/
 │   ├── waf_model.pkl        # Trained Random Forest model (joblib)
 │   ├── metrics.json         # Training metrics (accuracy, F1, AUC, importances)
-│   └── baseline.pkl         # Isolation Forest baseline (saved periodically)
+│   └── unsupervised_baseline.pkl  # Isolation Forest baseline (saved periodically, created on first save)
 ├── static/
 │   └── index.html           # Full-featured SPA dashboard
 └── requirements.txt
@@ -290,8 +290,6 @@ Each source file has a companion markdown document explaining its architecture a
 | Concept | open-appsec | This project |
 |---|---|---|
 | Language | C++ (engine) + Go (management) | Python |
-| Supervised model | Gradient Boosted Trees | Random Forest (sklearn) |
-| Unsupervised model | Isolation Forest / OCSVM | Isolation Forest (sklearn) |
 | Feature engineering | Proprietary 100+ features | 75 engineered features |
 | Policy engine | YAML/REST | JSON/REST |
 | Modes | Prevent / Detect / Transparent | Prevent / Detect / Monitor |

@@ -710,7 +710,13 @@ def parse_csic_2010(filepath: str, label: int, attack_type: str = 'sqli') -> Lis
     """
     Parse a CSIC 2010 HTTP dataset file.
 
-    Each file contains raw HTTP/1.1 requests separated by blank lines.
+    Supports two formats:
+      1. Raw HTTP/1.1 requests separated by blank lines.
+      2. Wrapped format with 'Start - Id: N' / 'class: Valid|Attack' /
+         <raw HTTP request> / 'End - Id: N' blocks (also separated by
+         blank lines, but the request itself may contain blank lines
+         between headers and body).
+
     Download from: http://www.isi.csic.es/dataset/
 
     Args:
@@ -729,25 +735,33 @@ def parse_csic_2010(filepath: str, label: int, attack_type: str = 'sqli') -> Lis
     with open(filepath, 'r', encoding='latin-1', errors='ignore') as fh:
         content = fh.read()
 
-    raw_blocks = re.split(r'\r?\n\r?\n', content.strip())
+    # Wrapped format: split on 'Start - Id:' markers.
+    if re.search(r'^Start - Id:', content, re.M):
+        raw_blocks = re.split(r'^Start - Id:.*$', content, flags=re.M)[1:]
+    else:
+        raw_blocks = re.split(r'\r?\n\r?\n', content.strip())
 
     for block in raw_blocks:
-        block = block.strip()
-        if not block:
+        lines = [l for l in block.splitlines()]
+        # Skip leading 'class:' / blank lines until the request line.
+        idx = 0
+        while idx < len(lines) and not re.match(
+            r'^(GET|POST|PUT|DELETE|HEAD|OPTIONS)\s+(\S+)\s+HTTP/[\d.]+', lines[idx], re.I
+        ):
+            idx += 1
+        if idx >= len(lines):
             continue
-        lines = block.splitlines()
 
-        m = re.match(r'^(GET|POST|PUT|DELETE|HEAD|OPTIONS)\s+(\S+)\s+HTTP/[\d.]+', lines[0], re.I)
-        if not m:
-            continue
-
+        m = re.match(r'^(GET|POST|PUT|DELETE|HEAD|OPTIONS)\s+(\S+)\s+HTTP/[\d.]+', lines[idx], re.I)
         method = m.group(1).upper()
         url = m.group(2)
         headers: Dict[str, str] = {}
         body_lines = []
         in_body = False
 
-        for line in lines[1:]:
+        for line in lines[idx + 1:]:
+            if re.match(r'^End - Id:', line):
+                break
             if not in_body:
                 if line == '':
                     in_body = True
@@ -757,11 +771,15 @@ def parse_csic_2010(filepath: str, label: int, attack_type: str = 'sqli') -> Lis
             else:
                 body_lines.append(line)
 
+        body = '\n'.join(body_lines).strip()
+        if body == 'null':
+            body = ''
+
         requests.append({
             'method': method,
             'url': url,
             'headers': headers,
-            'body': '\n'.join(body_lines).strip(),
+            'body': body,
             'ip': _rand_ip(),
             'label': label,
             'attack_type': attack_type if label == 1 else 'normal',

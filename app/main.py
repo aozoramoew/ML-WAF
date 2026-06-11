@@ -4,6 +4,7 @@ ML-WAF — FastAPI Application Entry Point (open-appsec clone)
 Endpoints:
   GET  /                        → Serves the dashboard SPA
   POST /analyze                 → Analyze a single HTTP request snapshot
+  ANY  /waf_check                → nginx auth_request gate (200=allow, 403=block)
   POST /simulate/start          → Start a traffic simulation scenario
   POST /simulate/stop           → Stop current simulation
   GET  /simulate/scenarios      → List available scenarios
@@ -146,6 +147,39 @@ async def analyze_request(snapshot: RequestSnapshot):
     result = await waf_engine.analyze(snapshot.model_dump())
     await manager.broadcast({'type': 'request', 'data': _slim(result)})
     return result
+
+
+@app.api_route('/waf_check', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
+async def waf_check(request: Request):
+    """
+    Reverse-proxy gate for nginx `auth_request` (or any proxy that only
+    understands HTTP status codes).
+
+    Reads the original request from headers/body forwarded by nginx:
+      X-Original-URI, X-Original-Method, X-Real-IP (set these in nginx config)
+
+    Returns:
+      200 → ALLOW (nginx proxies the request to the backend)
+      403 → BLOCK (nginx returns 403 to the client)
+    """
+    body_bytes = await request.body()
+    snapshot = {
+        'method':  request.headers.get('x-original-method', request.method),
+        'url':     request.headers.get('x-original-uri', str(request.url.path)),
+        'headers': dict(request.headers),
+        'body':    body_bytes.decode('utf-8', errors='ignore'),
+        'ip':      request.headers.get('x-real-ip', request.headers.get('x-forwarded-for', '0.0.0.0')),
+    }
+
+    result = await waf_engine.analyze(snapshot)
+    await manager.broadcast({'type': 'request', 'data': _slim(result)})
+
+    if result['decision'] == 'BLOCK':
+        return JSONResponse(
+            status_code=403,
+            content={'block': True, 'reason': result.get('attack_type'), 'id': result['id']},
+        )
+    return JSONResponse(status_code=200, content={'block': False, 'id': result['id']})
 
 
 @app.post('/simulate/start')

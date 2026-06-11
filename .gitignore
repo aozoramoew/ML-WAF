@@ -34,6 +34,7 @@ env/
 ENV/
 env.bak/
 venv.bak/
+ml-waf/
 
 # ── Trained models (large binary files — retrain on deploy) ──────────────────
 # Uncomment these if you do NOT want to commit the trained model to git.

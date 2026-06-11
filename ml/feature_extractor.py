@@ -19,6 +19,7 @@ import json
 import base64
 import numpy as np
 from typing import Dict, Any
+from urllib.parse import unquote_plus
 
 # ── Attack pattern libraries ──────────────────────────────────────────────────
 
@@ -161,7 +162,13 @@ def extract_features(request_data: Dict[str, Any]) -> Dict[str, float]:
 
     path = url.split('?', 1)[0]
     query = url.split('?', 1)[1] if '?' in url else ''
-    full = (url + ' ' + body).lower()
+
+    # Decode percent-encoding for pattern matching so that e.g. %27 OR %271%27=%271
+    # is recognized the same as ' OR '1'='1. Structural features (url_length,
+    # pct_encoded, etc.) still use the raw url/path/query above.
+    decoded_url = unquote_plus(url)
+    decoded_body = unquote_plus(body)
+    full = (decoded_url + ' ' + decoded_body).lower()
     full_with_headers = (full + ' ' + str(headers)).lower()
 
     f: Dict[str, float] = {}
@@ -209,9 +216,9 @@ def extract_features(request_data: Dict[str, Any]) -> Dict[str, float]:
 
     # ── Command Injection features ───────────────────────────────────
     f['cmd_injection_count'] = sum(1 for p in CMD_INJECTION_PATTERNS if p.lower() in full)
-    f['has_pipe'] = float('|' in url or '|' in body)
-    f['has_backtick'] = float('`' in url or '`' in body)
-    f['has_dollar_paren'] = float('$(' in url or '$(' in body)
+    f['has_pipe'] = float('|' in full)
+    f['has_backtick'] = float('`' in full)
+    f['has_dollar_paren'] = float('$(' in full)
 
     # ── NoSQL Injection features ─────────────────────────────────────
     f['nosql_operator_count'] = sum(1 for p in NOSQL_PATTERNS if p in full)

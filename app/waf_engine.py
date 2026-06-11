@@ -122,12 +122,13 @@ ATTACK_LABELS = {
 def _infer_attack_type(features: dict) -> str:
     if features.get('has_script_tag', 0) or features.get('xss_pattern_count', 0) > 1:
         return 'xss'
-    if features.get('sql_keyword_count', 0) > 1 or features.get('has_union', 0):
+    if features.get('sql_keyword_count', 0) > 1 or features.get('has_union', 0) \
+            or features.get('sql_tautology', 0):
         return 'sqli'
-    if features.get('path_traversal_count', 0) > 0 or features.get('has_dotdot', 0):
-        return 'path_traversal'
     if features.get('cmd_injection_count', 0) > 0:
         return 'cmd_injection'
+    if features.get('path_traversal_count', 0) > 0 or features.get('has_dotdot', 0):
+        return 'path_traversal'
     if features.get('nosql_operator_count', 0) > 1:
         return 'nosql_injection'
     if features.get('has_aws_metadata', 0) or features.get('has_internal_ip', 0):
@@ -170,6 +171,12 @@ async def analyze(request_data: dict) -> dict:
         'unsupervised_score': 0.0,
     }
 
+    # ── Feature extraction (used by ML stages and as attack-type fallback
+    #    for any earlier stage that blocks without a specific type) ──────
+    features = extract_features(request_data)
+    result['features'] = {k: round(float(v), 4) for k, v in features.items()}
+    feature_arr = features_to_array(features).reshape(1, -1)
+
     # ── Stage 1: Rate Limiter ─────────────────────────────────────────
     rl = rate_limiter.check(request_data)
     result['modules']['rate_limiter'] = rl
@@ -192,7 +199,10 @@ async def analyze(request_data: dict) -> dict:
     ips = ips_engine.check(request_data)
     result['modules']['ips'] = ips
     if ips['block']:
-        return _finalize(result, 'ips', 'ips_match', ips.get('confidence', 0.95), timestamp)
+        attack = _infer_attack_type(features)
+        if attack == 'unknown':
+            attack = 'ips_match'
+        return _finalize(result, 'ips', attack, ips.get('confidence', 0.95), timestamp)
 
     # ── Stage 5: File Security ────────────────────────────────────────
     fs = file_security.check(request_data)
@@ -214,9 +224,6 @@ async def analyze(request_data: dict) -> dict:
 
     # ── Stage 8: ML Model (Supervised) ───────────────────────────────
     model = get_model()
-    features = extract_features(request_data)
-    result['features'] = {k: round(float(v), 4) for k, v in features.items()}
-    feature_arr = features_to_array(features).reshape(1, -1)
 
     ml_result = {'block': False, 'confidence': 0.0, 'score': 0.0}
     if model is not None:

@@ -11,6 +11,7 @@ Supports:
 
 import re
 import json
+import copy
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -71,9 +72,9 @@ def load() -> Dict:
                 _policy = json.load(f)
         except Exception as e:
             print(f'[Policy] Failed to load {POLICY_PATH}: {e}')
-            _policy = DEFAULT_POLICY.copy()
+            _policy = copy.deepcopy(DEFAULT_POLICY)
     else:
-        _policy = DEFAULT_POLICY.copy()
+        _policy = copy.deepcopy(DEFAULT_POLICY)
         save()
 
     _compile_rules()
