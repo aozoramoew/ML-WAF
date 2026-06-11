@@ -45,17 +45,17 @@ DATA_DIR.mkdir(exist_ok=True)
 # Data loading
 # ─────────────────────────────────────────────────────────────────────────────
 
-def load_all_data(csic_normal: Optional[str], csic_attack: Optional[str]) -> list:
+def load_all_data(csic_normal: list, csic_attack: list) -> list:
     """Combine real CSIC 2010 data with synthetic data."""
     all_requests = []
 
     # 1. Real CSIC 2010 normal traffic
-    if csic_normal:
-        all_requests.extend(parse_csic_2010(csic_normal, label=0, attack_type='normal'))
+    for path in csic_normal:
+        all_requests.extend(parse_csic_2010(path, label=0, attack_type='normal'))
 
     # 2. Real CSIC 2010 attack traffic
-    if csic_attack:
-        all_requests.extend(parse_csic_2010(csic_attack, label=1, attack_type='sqli'))
+    for path in csic_attack:
+        all_requests.extend(parse_csic_2010(path, label=1, attack_type='sqli'))
 
     # 3. Always add synthetic data (more diversity of attack types)
     syn_df = generate_dataset()
@@ -144,14 +144,27 @@ def main():
     args = parser.parse_args()
 
     # Auto-detect CSIC files from data/ dir if not specified
-    csic_normal = args.csic_normal or (
-        str(DATA_DIR / 'normalTrafficTraining.txt')
-        if (DATA_DIR / 'normalTrafficTraining.txt').exists() else None
-    )
-    csic_attack = args.csic_attack or (
-        str(DATA_DIR / 'anomalousTrafficTest.txt')
-        if (DATA_DIR / 'anomalousTrafficTest.txt').exists() else None
-    )
+    NORMAL_CANDIDATES = [
+        'normalTrafficTraining.txt', 'normalTrafficTest.txt',
+        'cisc_normalTraffic_train.txt', 'cisc_normalTraffic_test.txt',
+    ]
+    ATTACK_CANDIDATES = [
+        'anomalousTrafficTest.txt', 'cisc_anomalousTraffic_test.txt',
+    ]
+
+    if args.csic_normal:
+        csic_normal = [args.csic_normal]
+    else:
+        csic_normal = [str(DATA_DIR / f) for f in NORMAL_CANDIDATES if (DATA_DIR / f).exists()]
+
+    if args.csic_attack:
+        csic_attack = [args.csic_attack]
+    else:
+        csic_attack = [str(DATA_DIR / f) for f in ATTACK_CANDIDATES if (DATA_DIR / f).exists()]
+        # Avoid double-counting the same dataset in both raw and wrapped form
+        if str(DATA_DIR / 'anomalousTrafficTest.txt') in csic_attack \
+                and str(DATA_DIR / 'cisc_anomalousTraffic_test.txt') in csic_attack:
+            csic_attack.remove(str(DATA_DIR / 'cisc_anomalousTraffic_test.txt'))
 
     print("=" * 65)
     print("  ML-WAF — Model Training")
