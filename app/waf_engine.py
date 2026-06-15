@@ -172,6 +172,15 @@ async def analyze(request_data: dict) -> dict:
         'unsupervised_score': 0.0,
     }
 
+    # ── Stage 0: Policy (IP/path allow/blocklists) ────────────────────
+    policy_result = policy.check_request(request_data)
+    if policy_result['action'] == 'allow':
+        result['modules']['policy'] = policy_result
+        _update_stats(result, blocked=False)
+        return result
+    if policy_result['block']:
+        return _finalize(result, 'policy', 'policy_blocklist', 1.0, timestamp)
+
     # ── Feature extraction (used by ML stages and as attack-type fallback
     #    for any earlier stage that blocks without a specific type) ──────
     features = extract_features(request_data)
@@ -293,11 +302,21 @@ def _fuse_confidence(supervised_score: float, unsupervised_score: float) -> floa
 
 
 def _finalize(result: dict, blocked_by: str, attack_type: str, confidence: float, ts: float) -> dict:
-    result['decision']    = 'BLOCK'
+    mode = policy.get_policy().get('mode', 'prevent')
+
     result['blocked_by']  = blocked_by
     result['attack_type'] = attack_type
     result['confidence']  = round(confidence, 4)
-    _update_stats(result, blocked=True)
+
+    if mode == 'prevent':
+        result['decision'] = 'BLOCK'
+        _update_stats(result, blocked=True)
+    else:
+        # detect/monitor: record what *would* have been blocked, but allow it through
+        result['decision'] = 'ALLOW'
+        result['would_block'] = True
+        _update_stats(result, blocked=False)
+
     return result
 
 
@@ -346,6 +365,12 @@ def _update_stats(result: dict, blocked: bool):
         _stats['blocked_by'][by] = _stats['blocked_by'].get(by, 0) + 1
     else:
         _stats['allowed'] += 1
+        # detect/monitor mode: still surface what *would* have been blocked
+        if result.get('would_block'):
+            at = result.get('attack_type', 'unknown')
+            _stats['attack_counts'][at] = _stats['attack_counts'].get(at, 0) + 1
+            by = result.get('blocked_by', 'unknown')
+            _stats['blocked_by'][by] = _stats['blocked_by'].get(by, 0) + 1
 
     # Keep last 300 data points for time-series chart
     _stats['req_history'].append({'t': now, 'blocked': blocked})

@@ -151,3 +151,49 @@ def test_update_policy_persists_to_disk():
     assert data['thresholds']['ml_block_score'] == 0.8
     # Other thresholds remain untouched (deep merge).
     assert data['thresholds']['combined_block_score'] == 0.65
+
+
+# ── POST /policy/rules/import ─────────────────────────────────────────────────
+
+@pytest.fixture
+def client():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    return TestClient(app)
+
+
+def test_import_rules_from_json_file(client):
+    payload = {
+        'ip_allowlist': ['198.51.100.10'],
+        'ip_blocklist': ['203.0.113.99'],
+        'path_allowlist': ['^/health'],
+    }
+    files = {'file': ('rules.json', json.dumps(payload), 'application/json')}
+    r = client.post('/policy/rules/import', files=files)
+    assert r.status_code == 200
+    body = r.json()
+    assert body['results']['ip_allowlist'] == {'added': 1, 'skipped': 0}
+    assert body['results']['ip_blocklist'] == {'added': 1, 'skipped': 0}
+    assert body['results']['path_allowlist'] == {'added': 1, 'skipped': 0}
+    assert '198.51.100.10' in policy.get_policy()['rules']['ip_allowlist']
+    assert '203.0.113.99' in policy.get_policy()['rules']['ip_blocklist']
+
+
+def test_import_rules_rejects_unknown_rule_type(client):
+    files = {'file': ('rules.json', json.dumps({'not_a_real_type': ['x']}), 'application/json')}
+    r = client.post('/policy/rules/import', files=files)
+    assert r.status_code == 400
+    assert 'Unknown rule type' in r.json()['detail']
+
+
+def test_import_rules_rejects_invalid_json(client):
+    files = {'file': ('rules.json', '{not valid json', 'application/json')}
+    r = client.post('/policy/rules/import', files=files)
+    assert r.status_code == 400
+    assert 'Invalid JSON' in r.json()['detail']
+
+
+def test_import_rules_rejects_non_object_json(client):
+    files = {'file': ('rules.json', json.dumps(['a', 'b']), 'application/json')}
+    r = client.post('/policy/rules/import', files=files)
+    assert r.status_code == 400

@@ -1,5 +1,128 @@
 # Integrating ML-WAF into a Production Architecture
 
+## Step-by-Step: Add ML-WAF to ANY Existing Web App
+
+This section is a self-contained checklist for dropping ML-WAF in front of
+(or inside) an app you already have running — without needing the repo's
+demo stack. Pick **one** of the two paths below.
+
+### Path A — Reverse Proxy (no app code changes)
+
+Use this if your app already sits behind (or can sit behind) Nginx,
+Apache, Caddy, Traefik, or an API gateway/ingress.
+
+**Step 1 — Run ML-WAF as its own service**
+
+```bash
+git clone <this-repo>
+cd ML-WAF
+docker build -t ml-waf .
+docker run -d --name ml-waf -p 8000:8000 \
+  -v $(pwd)/data:/app/data -v $(pwd)/models:/app/models ml-waf
+```
+
+Or run it directly with Python (`uvicorn app.main:app --host 0.0.0.0 --port 8000`).
+Verify it's healthy: `curl http://localhost:8000/health`.
+
+**Step 2 — Point your existing proxy at `/waf_check`**
+
+`/waf_check` is the only endpoint that returns plain HTTP status codes
+(200 = allow, 403 = block), which is what `auth_request`/`auth-url`-style
+gates expect. Pick the snippet matching your proxy:
+
+- **Nginx** — add the `auth_request /waf_check` block shown in §1 below
+  to your existing `server {}` block (just the `location = /waf_check`
+  and `auth_request` line — no need to restructure your config).
+- **Apache** (`mod_auth_request` + `mod_proxy`):
+  ```apache
+  <Location "/">
+      AuthType                    None
+      AuthFormProvider            none
+      AuthRequestSet              X-Original-URI %{REQUEST_URI}
+      AuthRequestSet              X-Real-IP %{REMOTE_ADDR}
+      AuthRequest                 "http://127.0.0.1:8000/waf_check"
+  </Location>
+  ```
+- **Caddy**:
+  ```caddyfile
+  forward_auth localhost:8000 {
+      uri /waf_check
+      copy_headers X-Original-URI X-Real-IP
+  }
+  ```
+- **Kubernetes / nginx-ingress** — use the `auth-url` annotation shown in
+  §3 of `deployment_guide.md`.
+
+**Step 3 — Verify**
+
+```bash
+# Normal request → 200, passes through
+curl -i http://your-site/
+
+# Obvious attack payload → 403 from your proxy
+curl -i "http://your-site/?q=' OR '1'='1"
+```
+
+Check the dashboard (`http://<ml-waf-host>:8000/`) — both requests should
+appear in **Live Events**.
+
+**Step 4 — Tune for your site**
+
+Default thresholds are tuned for general traffic and may over- or
+under-block for your specific app. See **Tuning Thresholds** below —
+adjust `PUT /policy/thresholds`, allowlist known-good paths/IPs via
+`POST /policy/rules` (or bulk-import a JSON file of rules via
+`POST /policy/rules/import` / the dashboard's Policy tab), and optionally
+feed in labeled traffic via `POST /ml/upload_labeled` + retrain.
+
+---
+
+### Path B — Application Middleware (no proxy changes)
+
+Use this if you can't modify your reverse proxy/ingress, but can edit
+your app's request pipeline (e.g. add Express middleware, a Django/Flask
+`before_request` hook, a Spring `Filter`, etc.).
+
+**Step 1 — Run ML-WAF as its own service** (same as Path A, Step 1).
+
+**Step 2 — Add a middleware that calls `POST /analyze`**
+
+`/analyze` always returns HTTP 200 with a JSON body —
+`{decision, reason, attack_type, confidence, features}`. Your middleware
+inspects `decision` and blocks (`403`) or allows (`next()`/`return`)
+accordingly. Ready-to-paste snippets for every major stack are available
+two ways:
+
+```bash
+# Fetch a snippet for your language
+curl http://localhost:8000/integrations/nodejs   # or python, php, java, go
+```
+
+or from the dashboard's **Integration** tab (Node.js, Python, PHP, Java,
+Go tabs). Drop the snippet into your app, set `WAF_URL` to your ML-WAF
+instance's address, and wire it in as the **first** middleware/filter in
+your request pipeline (before routing/auth) so blocked requests never
+reach your handlers.
+
+**Step 3 — Verify and tune** — same as Path A, Steps 3–4.
+
+---
+
+### Choosing between Path A and Path B
+
+| | Reverse Proxy (`/waf_check`) | Middleware (`/analyze`) |
+|---|---|---|
+| App code changes | None | One middleware/filter added |
+| Works for | Any backend behind Nginx/Apache/Caddy/ingress | Any framework with a request-pipeline hook |
+| Granularity | All-or-nothing per request | Full JSON detail (`attack_type`, `features`, `confidence`) available to your app |
+| Best for | Fastest rollout, polyglot/microservice fleets | Apps wanting to log/customize on `attack_type`, or with no proxy layer |
+
+Both paths can be used together (e.g. proxy-level blocking for known-bad
+traffic, plus app-level logging of `attack_type` for analytics) — they're
+not mutually exclusive.
+
+---
+
 ## Overview
 
 The ML-WAF project acts as a standalone analysis engine. To protect a real web

@@ -209,3 +209,77 @@ def test_stats_track_blocked_and_allowed_counts():
     assert stats['blocked'] == 1
     assert stats['allowed'] == 1
     assert stats['attack_counts'].get('sqli') == 1
+
+
+# ── Policy mode (prevent/detect/monitor) ───────────────────────────────────────
+
+def _with_mode(mode):
+    original = policy.get_policy().get('mode', 'prevent')
+    policy.update_policy({'mode': mode})
+    return original
+
+
+def test_detect_mode_allows_but_flags_attack():
+    original = _with_mode('detect')
+    try:
+        result = _analyze(_request(url="/login?user=admin&pass=' OR '1'='1"))
+        assert result['decision'] == 'ALLOW'
+        assert result['would_block'] is True
+        assert result['attack_type'] == 'sqli'
+        assert result['blocked_by'] == 'ml_waf'
+    finally:
+        policy.update_policy({'mode': original})
+
+
+def test_monitor_mode_allows_but_flags_attack():
+    original = _with_mode('monitor')
+    try:
+        result = _analyze(_request(url="/login?user=admin&pass=' OR '1'='1"))
+        assert result['decision'] == 'ALLOW'
+        assert result['would_block'] is True
+    finally:
+        policy.update_policy({'mode': original})
+
+
+def test_prevent_mode_still_blocks():
+    original = _with_mode('prevent')
+    try:
+        result = _analyze(_request(url="/login?user=admin&pass=' OR '1'='1"))
+        assert result['decision'] == 'BLOCK'
+        assert 'would_block' not in result
+    finally:
+        policy.update_policy({'mode': original})
+
+
+# ── Policy IP/path rules ────────────────────────────────────────────────────────
+
+def test_ip_blocklist_blocks_request_in_prevent_mode():
+    ip = _next_ip()
+    policy.add_rule('ip_blocklist', ip)
+    try:
+        result = _analyze(_request(url='/', ip=ip))
+        assert result['decision'] == 'BLOCK'
+        assert result['blocked_by'] == 'policy'
+    finally:
+        policy.remove_rule('ip_blocklist', ip)
+
+
+def test_ip_allowlist_overrides_attack_signature():
+    ip = _next_ip()
+    policy.add_rule('ip_allowlist', ip)
+    try:
+        result = _analyze(_request(url="/login?user=admin&pass=' OR '1'='1", ip=ip))
+        assert result['decision'] == 'ALLOW'
+        assert result['modules']['policy']['action'] == 'allow'
+    finally:
+        policy.remove_rule('ip_allowlist', ip)
+
+
+def test_path_blocklist_blocks_request_in_prevent_mode():
+    policy.add_rule('path_blocklist', r'^/secret')
+    try:
+        result = _analyze(_request(url='/secret/data'))
+        assert result['decision'] == 'BLOCK'
+        assert result['blocked_by'] == 'policy'
+    finally:
+        policy.remove_rule('path_blocklist', r'^/secret')

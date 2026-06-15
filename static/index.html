@@ -501,6 +501,13 @@ pre{padding:18px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-hei
                       placeholder="Paste multiple values, one per line (uses the rule type selected above)"></textarea>
             <button class="btn btn-p" onclick="addRulesBulk()" style="align-self:flex-start">+ Add All</button>
           </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;padding-top:10px;border-top:1px solid var(--border)">
+            <div style="flex:1">
+              <input class="in" type="file" id="rule-import-file" accept=".json" style="width:100%">
+              <div style="font-size:11px;color:var(--t3);margin-top:4px">JSON file: {"ip_allowlist":[...], "ip_blocklist":[...], "path_allowlist":[...], "path_blocklist":[...]} — any subset of keys</div>
+            </div>
+            <button class="btn btn-p" onclick="importRulesFile()" style="align-self:flex-start">⬆ Import File</button>
+          </div>
           <div id="rules-list"></div>
         </div>
       </div>
@@ -561,8 +568,11 @@ pre{padding:18px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-hei
           <div class="card-title">🔌 Integration Guide</div>
           <p style="font-size:13px;color:var(--t2);margin-bottom:10px;line-height:1.7">Add ML-WAF protection to any web app in minutes. There are two ways to integrate:</p>
           <p style="font-size:13px;color:var(--t2);margin-bottom:16px;line-height:1.7">
-            <strong>1. Reverse proxy via <code>/waf_check</code></strong> (recommended) — point Nginx (or any proxy with <code>auth_request</code> support) at ML-WAF; it returns <code>200</code> to allow or <code>403</code> to block. No application code changes needed — see the <strong>Nginx</strong> tab below.<br>
+            <strong>1. Reverse proxy via <code>/waf_check</code></strong> (recommended) — point Nginx, Apache, Caddy, Traefik, or an ingress controller (any proxy with <code>auth_request</code>/<code>forward_auth</code>/<code>auth-url</code> support) at ML-WAF; it returns <code>200</code> to allow or <code>403</code> to block. No application code changes needed — see the <strong>Nginx</strong> tab below.<br>
             <strong>2. Middleware via <code>/analyze</code></strong> — call ML-WAF directly from your app's request pipeline using one of the language snippets below; it returns full JSON detail (<code>decision</code>, <code>reason</code>, <code>attack_type</code>, <code>features</code>).
+          </p>
+          <p style="font-size:13px;color:var(--t2);margin-bottom:16px;line-height:1.7">
+            For a full step-by-step checklist (run ML-WAF, wire up your proxy or middleware, verify, then tune thresholds/rules for your site), see <strong><code>docs/integration_guide.md</code></strong> — section "Step-by-Step: Add ML-WAF to ANY Existing Web App".
           </p>
           <div class="integ-tabs" id="itabs">
             <button class="itab on" onclick="showInteg('nodejs',this)">⬡ Node.js</button>
@@ -1007,6 +1017,21 @@ async function addRulesBulk(){
     await loadPolicy();
     toast(`Added ${d.added_count}, skipped ${d.skipped_count}`,'ok');
   }catch{toast('Failed to add rules','err');}
+}
+async function importRulesFile(){
+  const input=el('rule-import-file');
+  const file=input.files[0];
+  if(!file){toast('Choose a JSON file first','warn');return;}
+  const formData=new FormData(); formData.append('file',file);
+  try{
+    const r=await fetch('/policy/rules/import',{method:'POST',body:formData});
+    const d=await r.json();
+    if(!r.ok){toast(d.detail||'Failed to import rules','err');return;}
+    input.value='';
+    await loadPolicy();
+    const summary=Object.entries(d.results).map(([t,c])=>`${t}: +${c.added}/${c.skipped} skipped`).join(', ');
+    toast(`Imported — ${summary}`,'ok');
+  }catch{toast('Failed to import rules','err');}
 }
 
 // ── Simulation ─────────────────────────────────────────────────────────────

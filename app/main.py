@@ -17,6 +17,7 @@ Endpoints:
   GET  /policy                  → Get current security policy
   POST /policy/rules            → Add a policy rule
   POST /policy/rules/bulk       → Add multiple IP/path rules at once
+  POST /policy/rules/import     → Import IP/path rules from a JSON file
   DELETE /policy/rules          → Remove a policy rule
   PUT  /policy/mode             → Set WAF mode (prevent/detect/monitor)
   PUT  /policy/thresholds       → Update ML score thresholds
@@ -507,6 +508,48 @@ async def add_policy_rules_bulk(rule: PolicyRuleBulk):
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post('/policy/rules/import')
+async def import_policy_rules(file: UploadFile = File(...)):
+    """
+    Bulk-import IP/path rules from an uploaded JSON file.
+
+    Expected format: an object whose keys are rule types and whose values
+    are lists of strings, e.g.:
+      {
+        "ip_allowlist": ["10.0.0.1", "10.0.0.2"],
+        "ip_blocklist": ["1.2.3.4"],
+        "path_allowlist": ["/health", "/static/.*"],
+        "path_blocklist": ["/admin"]
+      }
+
+    Any subset of the four keys may be present; unknown keys are rejected.
+    """
+    valid_types = ['ip_allowlist', 'ip_blocklist', 'path_allowlist', 'path_blocklist']
+
+    raw = await file.read()
+    try:
+        data = json.loads(raw.decode('utf-8', errors='ignore'))
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f'Invalid JSON: {e}')
+
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail='File must contain a JSON object mapping rule types to lists of values')
+
+    unknown = [k for k in data if k not in valid_types]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f'Unknown rule type(s): {unknown}. Must be one of {valid_types}')
+
+    results = {}
+    updated = policy.get_policy()
+    for rule_type, values in data.items():
+        if not isinstance(values, list):
+            raise HTTPException(status_code=400, detail=f'Value for "{rule_type}" must be a list of strings')
+        added_count, skipped_count, updated = policy.add_rules_bulk(rule_type, [str(v) for v in values])
+        results[rule_type] = {'added': added_count, 'skipped': skipped_count}
+
+    return {'status': 'imported', 'results': results, 'policy': updated}
 
 
 @app.put('/policy/mode')
