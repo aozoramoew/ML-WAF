@@ -414,6 +414,20 @@ pre{padding:18px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-hei
           </div>
         </div>
         <div class="card" style="margin-top:14px">
+          <div class="card-title">📤 Upload Labeled Requests</div>
+          <p style="font-size:13px;color:var(--t3);line-height:1.6;margin-bottom:10px">
+            Upload a JSON/CSV/JSONL file of requests specific to your site, labeled
+            benign (0) or malicious (1). They'll be augmented into synthetic
+            variants and included next time you retrain.
+          </p>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input type="file" class="in" id="upload-file" accept=".json,.csv,.jsonl" style="flex:1">
+            <button class="btn btn-p" onclick="uploadLabeledData()">Upload &amp; Augment</button>
+          </div>
+          <div id="upload-result" class="muted" style="margin-top:8px;font-size:13px"></div>
+        </div>
+
+        <div class="card" style="margin-top:14px">
           <div class="card-title">🔬 Live Request Analyzer</div>
           <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap">
             <button class="btn btn-s" onclick="loadPreset('sqli')">💉 SQLi</button>
@@ -482,6 +496,11 @@ pre{padding:18px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-hei
             <input class="in" id="rule-val" style="flex:1" placeholder="e.g. 10.0.0.1 or /admin">
             <button class="btn btn-p" onclick="addRule()">+ Add Rule</button>
           </div>
+          <div style="display:flex;gap:8px;margin-bottom:12px">
+            <textarea class="in" id="rule-bulk-val" rows="3" style="flex:1;font-family:var(--mono)"
+                      placeholder="Paste multiple values, one per line (uses the rule type selected above)"></textarea>
+            <button class="btn btn-p" onclick="addRulesBulk()" style="align-self:flex-start">+ Add All</button>
+          </div>
           <div id="rules-list"></div>
         </div>
       </div>
@@ -540,7 +559,11 @@ pre{padding:18px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-hei
       <div class="tab-panel" id="tab-integrate">
         <div class="card">
           <div class="card-title">🔌 Integration Guide</div>
-          <p style="font-size:13px;color:var(--t2);margin-bottom:16px;line-height:1.7">Add ML-WAF protection to any web app in minutes. Each snippet forwards requests to the WAF API and blocks threats before they reach your app.</p>
+          <p style="font-size:13px;color:var(--t2);margin-bottom:10px;line-height:1.7">Add ML-WAF protection to any web app in minutes. There are two ways to integrate:</p>
+          <p style="font-size:13px;color:var(--t2);margin-bottom:16px;line-height:1.7">
+            <strong>1. Reverse proxy via <code>/waf_check</code></strong> (recommended) — point Nginx (or any proxy with <code>auth_request</code> support) at ML-WAF; it returns <code>200</code> to allow or <code>403</code> to block. No application code changes needed — see the <strong>Nginx</strong> tab below.<br>
+            <strong>2. Middleware via <code>/analyze</code></strong> — call ML-WAF directly from your app's request pipeline using one of the language snippets below; it returns full JSON detail (<code>decision</code>, <code>reason</code>, <code>attack_type</code>, <code>features</code>).
+          </p>
           <div class="integ-tabs" id="itabs">
             <button class="itab on" onclick="showInteg('nodejs',this)">⬡ Node.js</button>
             <button class="itab" onclick="showInteg('python',this)">🐍 Python</button>
@@ -549,6 +572,7 @@ pre{padding:18px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-hei
             <button class="itab" onclick="showInteg('go',this)">🐹 Go</button>
             <button class="itab" onclick="showInteg('docker',this)">🐳 Docker</button>
             <button class="itab" onclick="showInteg('kubernetes',this)">☸ K8s</button>
+            <button class="itab" onclick="showInteg('nginx',this)">🌐 Nginx</button>
           </div>
           <div class="code-block">
             <div class="code-hdr"><span class="code-lang" id="integ-lang">Node.js / Express</span><button class="copy-btn" onclick="copyCode()">📋 Copy</button></div>
@@ -849,6 +873,24 @@ async function retrainModel() {
   catch { toast('Failed to start retraining','err'); }
   setTimeout(()=>{b.disabled=false;b.textContent='🔄 Retrain Model';},3000);
 }
+async function uploadLabeledData() {
+  const fileInput=el('upload-file'); const result=el('upload-result');
+  const file=fileInput.files[0];
+  if(!file){ toast('Choose a file first','err'); return; }
+  const formData=new FormData(); formData.append('file',file);
+  result.textContent='⏳ Uploading & augmenting…';
+  try {
+    const r=await fetch('/ml/upload_labeled',{method:'POST',body:formData});
+    const d=await r.json();
+    if(!r.ok){ throw new Error(d.detail||'Upload failed'); }
+    result.innerHTML=`✅ Parsed <strong>${d.rows_parsed}</strong> rows, generated <strong>${d.rows_augmented}</strong> augmented variants (total written: <strong>${d.total_written}</strong>). Click "Retrain Model" to include them.`;
+    toast(`Uploaded ${d.rows_parsed} rows, ${d.rows_augmented} augmented`,'ok');
+    fileInput.value='';
+  } catch(e) {
+    result.textContent='❌ '+e.message;
+    toast('Upload failed: '+e.message,'err');
+  }
+}
 
 // ── Live Analyzer ──────────────────────────────────────────────────────────
 const PRESETS = {
@@ -954,6 +996,18 @@ async function addRule(){
   try{await fetch('/policy/rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rule_type:type,value:val})});el('rule-val').value='';await loadPolicy();toast('Rule added: '+val,'ok');}catch{toast('Failed to add rule','err');}
 }
 async function removeRule(type,val){try{await fetch('/policy/rules',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({rule_type:type,value:val})});await loadPolicy();toast('Rule removed','info');}catch{toast('Failed to remove rule','err');}}
+async function addRulesBulk(){
+  const type=el('rule-type').value;
+  const lines=el('rule-bulk-val').value.split('\n').map(v=>v.trim()).filter(Boolean);
+  if(!lines.length){toast('Enter at least one value','warn');return;}
+  try{
+    const r=await fetch('/policy/rules/bulk',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rule_type:type,values:lines})});
+    const d=await r.json();
+    el('rule-bulk-val').value='';
+    await loadPolicy();
+    toast(`Added ${d.added_count}, skipped ${d.skipped_count}`,'ok');
+  }catch{toast('Failed to add rules','err');}
+}
 
 // ── Simulation ─────────────────────────────────────────────────────────────
 async function loadScenarios() {
@@ -991,7 +1045,7 @@ async function toggleLearning(){try{const r=await fetch('/learn/toggle',{method:
 async function saveLearning(){try{await fetch('/learn/save',{method:'POST'});toast('💾 Baseline saved','ok');}catch{toast('Failed to save','err');}}
 
 // ── Integration snippets ───────────────────────────────────────────────────
-const LANG_LABELS={'nodejs':'Node.js / Express','python':'Python / FastAPI','php':'PHP','java':'Java Spring Boot','go':'Go net/http','docker':'Docker Compose','kubernetes':'Kubernetes'};
+const LANG_LABELS={'nodejs':'Node.js / Express','python':'Python / FastAPI','php':'PHP','java':'Java Spring Boot','go':'Go net/http','docker':'Docker Compose','kubernetes':'Kubernetes','nginx':'Nginx (auth_request)'};
 async function showInteg(lang,btn){
   document.querySelectorAll('.itab').forEach(t=>t.classList.remove('on')); if(btn)btn.classList.add('on');
   el('integ-lang').textContent=LANG_LABELS[lang]||lang; el('integ-code').textContent='Loading…';

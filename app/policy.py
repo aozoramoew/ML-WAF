@@ -133,6 +133,41 @@ def add_rule(rule_type: str, value: str) -> Dict:
     return _policy
 
 
+def add_rules_bulk(rule_type: str, values: List[str]) -> Dict:
+    """
+    Add multiple rules to the policy in a single save.
+
+    rule_type: 'ip_allowlist' | 'ip_blocklist' | 'path_allowlist' | 'path_blocklist'
+    Returns (added_count, skipped_count, policy).
+    """
+    if not _policy:
+        load()
+
+    valid_types = ['ip_allowlist', 'ip_blocklist', 'path_allowlist', 'path_blocklist']
+    if rule_type not in valid_types:
+        raise ValueError(f'Invalid rule type: {rule_type}. Must be one of {valid_types}')
+
+    rules_list = _policy['rules'][rule_type]
+    added_count = 0
+    skipped_count = 0
+
+    for value in values:
+        value = value.strip()
+        if not value:
+            continue
+        if value not in rules_list:
+            rules_list.append(value)
+            added_count += 1
+        else:
+            skipped_count += 1
+
+    if added_count:
+        _compile_rules()
+        save()
+
+    return added_count, skipped_count, _policy
+
+
 def remove_rule(rule_type: str, value: str) -> Dict:
     """Remove a rule from the policy."""
     if not _policy:

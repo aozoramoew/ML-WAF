@@ -235,4 +235,63 @@ Docker Desktop started, ran `docker compose up -d --build`. Two issues found and
 Stack stopped after verification (`docker compose down`). Restart with
 `docker compose up -d --build`.
 
+## Status update (2026-06-12, threshold fix + labeled-data upload + bulk rules + docs)
+
+User reported `PUT /policy/thresholds` had no effect: thresholds were set to
+`ml_block_score: 0.50`, `unsupervised_block_score: 0.75`,
+`combined_block_score: 0.65`, but a request scoring `ml_score: 0.794` was
+still **ALLOW**ed.
+
+**Root cause (confirmed and fixed)**: `app/waf_engine.py` never read
+`policy.get_thresholds()` — the supervised-block check and the
+combined-fusion check used hardcoded `0.90`/`0.85` regardless of policy.
+Fixed by importing `app.policy` and reading
+`ml_block_score`/`unsupervised_block_score`/`combined_block_score` from
+`policy.get_thresholds()` at decision time (falling back to the old
+hardcoded values if unset). **Note**: `DEFAULT_POLICY` thresholds
+(`0.50/0.75/0.65`) are lower than the old hardcoded `0.90/0.85`, so fresh
+installs now block more aggressively at the documented defaults — this is
+the intended fix. New test `test_ml_block_score_threshold_is_honored` in
+`tests/test_waf_engine.py` uses a `_FakeModel` to deterministically verify
+a custom threshold changes the decision.
+
+**New: Upload labeled requests → augment → retrain** (Workstream 1):
+- `ml/dataset_generator.py`: new `augment_labeled_samples(samples,
+  variants_per_sample=5)` — generates synthetic variants via case
+  randomization, URL-encoding, comment padding, parameter reordering, and
+  IP/User-Agent variation, preserving `label`/`attack_type`.
+- `POST /ml/upload_labeled` (`app/main.py`): accepts JSON/JSONL/CSV of
+  site-specific labeled requests, validates `label` is 0/1, augments via
+  the above, and appends to `data/custom_labeled.jsonl`. Does not
+  auto-retrain.
+- `ml/train.py`: `load_all_data()` now also loads
+  `data/custom_labeled.jsonl` if present; `metrics.json` gains
+  `custom_samples`.
+- Dashboard: new "📤 Upload Labeled Requests" card in the ML tab
+  (`uploadLabeledData()`).
+
+**New: Bulk IP/Path policy rules** (Workstream 1.5):
+- `app/policy.py`: new `add_rules_bulk(rule_type, values)` — dedupes,
+  strips blanks, single `_compile_rules()`/`save()` for the whole batch.
+- `POST /policy/rules/bulk` (`app/main.py`, `PolicyRuleBulk` model).
+- Dashboard: bulk-paste textarea + "+ Add All" button in the "📜 IP &
+  Path Rules" card (`addRulesBulk()`).
+
+**Docs (Workstream 2)**:
+- Rewrote `docs/integration_guide.md`: leads with a Quick Start using the
+  verified `docker compose up -d --build` demo on port 8090, makes
+  `/waf_check` (not `/analyze`) the primary reverse-proxy pattern, adds
+  Troubleshooting and Tuning Thresholds sections (covering
+  `PUT /policy/thresholds`, `/ml/upload_labeled` + retrain, and
+  `/policy/rules/bulk`).
+- New `docs/deployment_guide.md`: step-by-step adaptation of
+  `demo-app/`+`nginx/nginx.conf`+`docker-compose.yml` to a real backend,
+  plus a Kubernetes sidecar / `nginx-ingress auth-url` pattern.
+- Dashboard Integration tab: added intro explaining reverse-proxy
+  (`/waf_check`) vs middleware (`/analyze`) modes, and a new "🌐 Nginx"
+  snippet tab (`INTEGRATION_SNIPPETS['nginx']` in `app/main.py`,
+  `LANG_LABELS` in the dashboard JS).
+
+All 59 tests pass (`ml-waf\Scripts\python.exe -m pytest tests/ -v`).
+
 **Nothing left open from this file's tracked gaps.**

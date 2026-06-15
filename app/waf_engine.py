@@ -82,6 +82,7 @@ from app.middleware import (
 )
 from app.middleware import nosql_injection, jwt_abuse
 from app.api_discovery import record as api_record
+from app import policy
 from ml.feature_extractor import extract_features, features_to_array, FEATURE_NAMES
 from ml.unsupervised import get_baseline, save_baseline
 
@@ -232,7 +233,8 @@ async def analyze(request_data: dict) -> dict:
         ml_result['score'] = round(malicious_score, 4)
         ml_result['confidence'] = round(malicious_score, 4)
 
-        if malicious_score >= 0.90:
+        ml_block_score = policy.get_thresholds().get('ml_block_score', 0.90)
+        if malicious_score >= ml_block_score:
             ml_result['block'] = True
             ml_result['attack_type'] = _infer_attack_type(features)
     else:
@@ -253,11 +255,14 @@ async def analyze(request_data: dict) -> dict:
     result['modules']['unsupervised'] = unsupervised
     result['unsupervised_score'] = unsupervised.get('anomaly_score', 0.0)
 
-    if unsupervised.get('is_anomaly', False):
+    unsupervised_block_score = policy.get_thresholds().get('unsupervised_block_score', 0.75)
+    is_anomaly = unsupervised.get('anomaly_score', 0.0) >= unsupervised_block_score
+    if is_anomaly:
         # Unsupervised doesn't block on its own — it boosts the supervised score
         # Only block if combined confidence exceeds threshold
         combined = _fuse_confidence(ml_result['score'], unsupervised['anomaly_score'])
-        if combined >= 0.85:
+        combined_block_score = policy.get_thresholds().get('combined_block_score', 0.85)
+        if combined >= combined_block_score:
             return _finalize(result, 'unsupervised', 'behavioral_anomaly', combined, timestamp)
 
     # ── Stage 10: API Discovery (always runs, rarely blocks) ──────────

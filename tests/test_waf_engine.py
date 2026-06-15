@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from app import waf_engine
+from app import waf_engine, policy
 
 
 NORMAL_HEADERS = {
@@ -164,6 +164,41 @@ def test_known_scanner_ua_is_blocked():
 
 
 # ── Stats tracking ────────────────────────────────────────────────────────────
+
+# ── Configurable thresholds (PUT /policy/thresholds) ─────────────────────────
+
+class _FakeModel:
+    """Stand-in for the trained model with a fixed malicious-class probability."""
+
+    def __init__(self, malicious_score):
+        self._malicious_score = malicious_score
+
+    def predict_proba(self, X):
+        return [[1 - self._malicious_score, self._malicious_score]]
+
+
+def test_ml_block_score_threshold_is_honored(monkeypatch):
+    """A request scoring 0.794 (below the old hardcoded 0.90 cutoff) should be
+    BLOCKed once ml_block_score is configured below that score."""
+    monkeypatch.setattr(waf_engine, '_model', _FakeModel(0.794))
+
+    original = policy.get_thresholds().get('ml_block_score')
+    try:
+        # With the configured default (0.50), 0.794 should already block.
+        policy.update_policy({'thresholds': {'ml_block_score': 0.50}})
+        result = _analyze(_request(url='/tienda1/publico/productos.jsp?id=1&page=2'))
+        assert result['ml_score'] == pytest.approx(0.794)
+        assert result['decision'] == 'BLOCK'
+        assert result['blocked_by'] == 'ml_waf'
+
+        # Raising the threshold above 0.794 should now allow the same score.
+        policy.update_policy({'thresholds': {'ml_block_score': 0.85}})
+        result = _analyze(_request(url='/tienda1/publico/productos.jsp?id=1&page=2'))
+        assert result['ml_score'] == pytest.approx(0.794)
+        assert result['decision'] == 'ALLOW'
+    finally:
+        policy.update_policy({'thresholds': {'ml_block_score': original}})
+
 
 def test_stats_track_blocked_and_allowed_counts():
     _analyze(_request(url='/tienda1/publico/productos.jsp'))

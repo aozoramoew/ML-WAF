@@ -118,6 +118,24 @@ def test_add_rule_invalid_type_raises():
         policy.add_rule('not_a_real_rule_type', 'value')
 
 
+def test_add_rules_bulk_adds_multiple_and_dedupes():
+    policy.add_rule('ip_blocklist', '203.0.113.5')
+    added, skipped, updated = policy.add_rules_bulk(
+        'ip_blocklist',
+        ['203.0.113.5', '203.0.113.6', '203.0.113.7', '  ', '203.0.113.6'],
+    )
+    assert added == 2
+    assert skipped == 2
+    assert set(updated['rules']['ip_blocklist']) == {
+        '203.0.113.5', '203.0.113.6', '203.0.113.7',
+    }
+
+
+def test_add_rules_bulk_invalid_type_raises():
+    with pytest.raises(ValueError):
+        policy.add_rules_bulk('not_a_real_rule_type', ['value'])
+
+
 # ── Thresholds / persistence ─────────────────────────────────────────────────
 
 def test_get_thresholds_returns_defaults():

@@ -13,8 +13,10 @@ Endpoints:
   GET  /model/info              → ML model metadata and feature importances
   GET  /modules/info            → Info about all active WAF modules
   POST /upload                  → Test file upload security
+  POST /ml/upload_labeled       → Upload labeled requests, augment, queue for retrain
   GET  /policy                  → Get current security policy
   POST /policy/rules            → Add a policy rule
+  POST /policy/rules/bulk       → Add multiple IP/path rules at once
   DELETE /policy/rules          → Remove a policy rule
   PUT  /policy/mode             → Set WAF mode (prevent/detect/monitor)
   PUT  /policy/thresholds       → Update ML score thresholds
@@ -25,6 +27,8 @@ Endpoints:
   WS   /ws                      → WebSocket live event stream
 """
 
+import csv
+import io
 import json
 import time
 import asyncio
@@ -123,6 +127,11 @@ class ThresholdUpdate(BaseModel):
     ml_block_score:          Optional[float] = None
     unsupervised_block_score: Optional[float] = None
     combined_block_score:    Optional[float] = None
+
+
+class PolicyRuleBulk(BaseModel):
+    rule_type: str   # ip_allowlist | ip_blocklist | path_allowlist | path_blocklist
+    values:    List[str]
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -267,6 +276,93 @@ async def retrain_model(background_tasks: BackgroundTasks):
     return {'status': 'training_started', 'message': 'Model is retraining in the background. It will reload automatically when finished.'}
 
 
+@app.post('/ml/upload_labeled')
+async def upload_labeled_data(file: UploadFile = File(...), variants_per_sample: int = 5):
+    """
+    Upload site-specific labeled requests (JSON or CSV), augment them into
+    synthetic variants, and append them to data/custom_labeled.jsonl for
+    inclusion in the next `/ml/retrain` run.
+
+    JSON: a list of objects with method, url, headers, body, ip (optional),
+          label (0/1), attack_type (optional).
+    CSV:  columns method,url,headers,body,label,attack_type — `headers` is a
+          JSON-encoded object string.
+
+    Does NOT trigger retraining — call /ml/retrain afterward.
+    """
+    from ml.dataset_generator import augment_labeled_samples
+
+    raw = await file.read()
+    filename = (file.filename or '').lower()
+
+    if filename.endswith('.csv'):
+        text = raw.decode('utf-8', errors='ignore')
+        reader = csv.DictReader(io.StringIO(text))
+        rows = list(reader)
+        for row in rows:
+            if 'headers' in row and row['headers']:
+                try:
+                    row['headers'] = json.loads(row['headers'])
+                except json.JSONDecodeError:
+                    row['headers'] = {}
+            else:
+                row['headers'] = {}
+    elif filename.endswith('.json') or filename.endswith('.jsonl'):
+        text = raw.decode('utf-8', errors='ignore')
+        try:
+            if filename.endswith('.jsonl'):
+                rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+            else:
+                rows = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f'Invalid JSON: {e}')
+        if not isinstance(rows, list):
+            raise HTTPException(status_code=400, detail='JSON file must contain a list of request objects')
+    else:
+        raise HTTPException(status_code=400, detail='Unsupported file type — use .json, .jsonl, or .csv')
+
+    if not rows:
+        raise HTTPException(status_code=400, detail='No rows found in uploaded file')
+
+    parsed = []
+    for i, row in enumerate(rows):
+        if 'method' not in row or 'url' not in row:
+            raise HTTPException(status_code=400, detail=f'Row {i}: missing required field "method" or "url"')
+        try:
+            label = int(row.get('label', 0))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f'Row {i}: "label" must be 0 or 1')
+        if label not in (0, 1):
+            raise HTTPException(status_code=400, detail=f'Row {i}: "label" must be 0 or 1')
+
+        attack_type = row.get('attack_type') or ('normal' if label == 0 else 'custom')
+        parsed.append({
+            'method': str(row.get('method', 'GET')).upper(),
+            'url': str(row.get('url', '/')),
+            'headers': row.get('headers') or {},
+            'body': str(row.get('body', '') or ''),
+            'ip': str(row.get('ip', '0.0.0.0')),
+            'label': label,
+            'attack_type': attack_type,
+        })
+
+    augmented = augment_labeled_samples(parsed, variants_per_sample=variants_per_sample)
+
+    data_dir = Path(__file__).parent.parent / 'data'
+    data_dir.mkdir(exist_ok=True)
+    custom_path = data_dir / 'custom_labeled.jsonl'
+    with open(custom_path, 'a', encoding='utf-8') as f:
+        for row in augmented:
+            f.write(json.dumps(row) + '\n')
+
+    return {
+        'status': 'uploaded',
+        'rows_parsed': len(parsed),
+        'rows_augmented': len(augmented) - len(parsed),
+        'total_written': len(augmented),
+    }
+
+
 @app.get('/modules/info')
 async def modules_info():
     """Information about all active WAF modules."""
@@ -396,6 +492,21 @@ async def remove_policy_rule(rule: PolicyRule):
     """Remove a policy rule."""
     updated = policy.remove_rule(rule.rule_type, rule.value)
     return {'status': 'removed', 'policy': updated}
+
+
+@app.post('/policy/rules/bulk')
+async def add_policy_rules_bulk(rule: PolicyRuleBulk):
+    """Add multiple IP/path allowlist or blocklist rules at once."""
+    try:
+        added_count, skipped_count, updated = policy.add_rules_bulk(rule.rule_type, rule.values)
+        return {
+            'status': 'added',
+            'added_count': added_count,
+            'skipped_count': skipped_count,
+            'policy': updated,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.put('/policy/mode')
@@ -755,6 +866,59 @@ networks:
     driver: bridge
 ''',
 
+    'nginx': '''# ML-WAF reverse-proxy via Nginx auth_request
+#
+# Gates all traffic to your backend through ML-WAF's /waf_check endpoint.
+# /waf_check returns 200 (allow) or 403 (block) — see the verified demo
+# in nginx/nginx.conf and docker-compose.yml for a working example.
+
+worker_processes auto;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    client_body_buffer_size 128k;
+    client_max_body_size 10m;
+
+    server {
+        listen 80;
+        server_name _;
+
+        # Ask ML-WAF if the request is safe
+        location = /waf_check {
+            internal;
+            proxy_pass {waf_url}/waf_check;
+            proxy_pass_request_body on;
+            proxy_set_header Content-Length $content_length;
+            proxy_set_header Content-Type $content_type;
+            proxy_set_header X-Original-URI $request_uri;
+            proxy_set_header X-Original-Method $request_method;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
+
+        # Your application — replace with your backend host:port
+        location / {
+            auth_request /waf_check;
+            error_page 403 = /blocked;
+
+            proxy_pass http://your-backend:8080;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
+
+        location = /blocked {
+            internal;
+            default_type application/json;
+            return 403 '{"error": "Request blocked by ML-WAF"}';
+        }
+    }
+}
+''',
+
     'kubernetes': '''# ML-WAF Kubernetes Deployment
 # Deploy as a DaemonSet sidecar alongside your application pods.
 
@@ -872,6 +1036,7 @@ async def list_integrations():
             'go':         'net/http middleware handler',
             'docker':     'Docker Compose sidecar deployment',
             'kubernetes': 'Kubernetes Deployment + Service + Ingress',
+            'nginx':      'Nginx reverse proxy via /waf_check (auth_request)',
         }
     }
 

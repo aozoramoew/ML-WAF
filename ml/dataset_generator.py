@@ -787,3 +787,118 @@ def parse_csic_2010(filepath: str, label: int, attack_type: str = 'sqli') -> Lis
 
     print(f"  [CSIC] Loaded {len(requests)} requests from {filepath}")
     return requests
+
+
+# ── Labeled-sample augmentation (uploaded site-specific data) ────────────────
+SQL_XSS_KEYWORDS_RE = re.compile(
+    r'\b(select|union|insert|update|delete|drop|or|and|script|alert|onerror|onload)\b',
+    re.I,
+)
+
+SCANNER_UAS = [
+    'sqlmap/1.7.8#stable', 'python-requests/2.28', 'Nikto/2.1.6',
+    'curl/7.68.0', 'OWASP-Scanner/1.0', 'dirbuster/1.0',
+]
+
+
+def _randomize_case(text: str) -> str:
+    """Randomly upper/lower-case characters within SQL/XSS keywords (e.g. UnIoN SeLeCt)."""
+    def _mix(match):
+        return ''.join(random.choice((c.upper(), c.lower())) for c in match.group(0))
+    return SQL_XSS_KEYWORDS_RE.sub(_mix, text)
+
+
+def _url_encode_query(url: str, double: bool = False) -> str:
+    """Percent-encode (optionally double-encode) special characters in the query string."""
+    if '?' not in url:
+        return url
+    path, _, query = url.partition('?')
+
+    def _enc(ch):
+        encoded = f'%{ord(ch):02X}'
+        return f'%25{encoded[1:]}' if double else encoded
+
+    special = set("'\"<> ;()|&`$")
+    encoded_query = ''.join(_enc(c) if c in special else c for c in query)
+    return f'{path}?{encoded_query}'
+
+
+def _pad_with_comments(text: str) -> str:
+    """Insert SQL comment markers / extra whitespace into a string (malicious only)."""
+    if not text:
+        return text
+    paddings = ['/**/', '  ', '/*comment*/', ' /*x*/']
+    pos = random.randint(0, len(text))
+    return text[:pos] + random.choice(paddings) + text[pos:]
+
+
+def _reorder_params(url_or_body: str) -> str:
+    """Shuffle the order of `key=value` pairs joined by `&`."""
+    if '&' not in url_or_body:
+        return url_or_body
+    if '?' in url_or_body:
+        prefix, _, query = url_or_body.partition('?')
+        sep = '?'
+    else:
+        prefix, query, sep = '', url_or_body, ''
+    parts = query.split('&')
+    random.shuffle(parts)
+    return f'{prefix}{sep}{"&".join(parts)}' if sep else '&'.join(parts)
+
+
+def augment_labeled_samples(samples: List[Dict], variants_per_sample: int = 5) -> List[Dict]:
+    """
+    Generate synthetic variants of user-uploaded labeled requests.
+
+    Each input sample (canonical dict with method/url/headers/body/ip/label/
+    attack_type) is expanded into `variants_per_sample` additional variants
+    using cheap, safe transformations (URL-encoding, case randomization,
+    comment padding, parameter reordering, header variation). The original
+    samples are preserved as-is alongside their variants.
+
+    This is purely additive — it does not modify generate_dataset() or any
+    of the existing _gen_* generators.
+    """
+    augmented: List[Dict] = list(samples)
+
+    for sample in samples:
+        label = sample.get('label', 0)
+        attack_type = sample.get('attack_type', 'normal' if label == 0 else 'custom')
+
+        for _ in range(variants_per_sample):
+            url = sample.get('url', '/')
+            body = sample.get('body', '') or ''
+            headers = dict(sample.get('headers', {}) or {})
+
+            transform = random.random()
+            if transform < 0.25:
+                url = _url_encode_query(url, double=random.random() < 0.3)
+            elif transform < 0.5:
+                url = _randomize_case(url)
+                body = _randomize_case(body)
+            elif transform < 0.75:
+                url = _reorder_params(url)
+                body = _reorder_params(body)
+            else:
+                if label == 1:
+                    url = _pad_with_comments(url)
+                    body = _pad_with_comments(body)
+                else:
+                    url = _reorder_params(url)
+
+            if label == 1 and random.random() < 0.3:
+                headers['User-Agent'] = random.choice(SCANNER_UAS)
+            else:
+                headers['User-Agent'] = random.choice(NORMAL_UAS)
+
+            augmented.append({
+                'method': sample.get('method', 'GET'),
+                'url': url,
+                'headers': headers,
+                'body': body,
+                'ip': _rand_ip(),
+                'label': label,
+                'attack_type': attack_type,
+            })
+
+    return augmented

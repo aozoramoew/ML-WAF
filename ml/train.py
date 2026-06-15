@@ -45,8 +45,26 @@ DATA_DIR.mkdir(exist_ok=True)
 # Data loading
 # ─────────────────────────────────────────────────────────────────────────────
 
+def load_custom_labeled_data() -> list:
+    """Load site-specific labeled requests uploaded via /ml/upload_labeled, if any."""
+    custom_path = DATA_DIR / 'custom_labeled.jsonl'
+    if not custom_path.exists():
+        return []
+
+    requests = []
+    with open(custom_path, encoding='utf-8') as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            requests.append(json.loads(line))
+
+    print(f"  [Custom] Loaded {len(requests)} requests from {custom_path}")
+    return requests
+
+
 def load_all_data(csic_normal: list, csic_attack: list) -> list:
-    """Combine real CSIC 2010 data with synthetic data."""
+    """Combine real CSIC 2010 data with synthetic data and any uploaded custom data."""
     all_requests = []
 
     # 1. Real CSIC 2010 normal traffic
@@ -60,6 +78,9 @@ def load_all_data(csic_normal: list, csic_attack: list) -> list:
     # 3. Always add synthetic data (more diversity of attack types)
     syn_df = generate_dataset()
     all_requests.extend(syn_df.to_dict('records'))
+
+    # 4. Site-specific labeled data uploaded via /ml/upload_labeled
+    all_requests.extend(load_custom_labeled_data())
 
     print(f"\n[Data] Total samples loaded: {len(all_requests)}")
     return all_requests
@@ -236,6 +257,7 @@ def main():
         'n_test': int(len(X_test)),
         'attack_distribution': attack_dist,
         'used_real_csic': bool(csic_normal or csic_attack),
+        'custom_samples': len(load_custom_labeled_data()),
     }
 
     metrics_path = MODEL_DIR / 'metrics.json'
