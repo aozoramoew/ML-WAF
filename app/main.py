@@ -36,7 +36,7 @@ import asyncio
 import json
 import logging
 import sys
-import subprocess
+import subprocess  # nosec B404 — used only to invoke the project's own training script
 from pathlib import Path
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
@@ -178,7 +178,7 @@ async def waf_check(request: Request):
         'url':     request.headers.get('x-original-uri', str(request.url.path)),
         'headers': dict(request.headers),
         'body':    body_bytes.decode('utf-8', errors='ignore'),
-        'ip':      request.headers.get('x-real-ip', request.headers.get('x-forwarded-for', '0.0.0.0')),
+        'ip':      request.headers.get('x-real-ip', request.headers.get('x-forwarded-for', '0.0.0.0')),  # nosec B104 — default for missing header, not a bind address
     }
 
     result = await waf_engine.analyze(snapshot)
@@ -267,7 +267,7 @@ async def retrain_model(background_tasks: BackgroundTasks):
     def run_training():
         try:
             # We use the same python interpreter running this FastAPI server
-            subprocess.run([sys.executable, '-m', 'ml.train'], check=True, cwd=str(Path(__file__).parent.parent))
+            subprocess.run([sys.executable, '-m', 'ml.train'], check=True, cwd=str(Path(__file__).parent.parent))  # nosec B603 — fixed arg list, no user input
             # Reload metrics into the engine after training
             waf_engine.load_models()
         except Exception as e:
@@ -342,7 +342,7 @@ async def upload_labeled_data(file: UploadFile = File(...), variants_per_sample:
             'url': str(row.get('url', '/')),
             'headers': row.get('headers') or {},
             'body': str(row.get('body', '') or ''),
-            'ip': str(row.get('ip', '0.0.0.0')),
+            'ip': str(row.get('ip', '0.0.0.0')),  # nosec B104 — default for missing field, not a bind address
             'label': label,
             'attack_type': attack_type,
         })

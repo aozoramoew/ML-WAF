@@ -161,7 +161,7 @@ async def analyze(request_data: dict) -> dict:
         'timestamp':       timestamp,
         'method':          request_data.get('method', 'GET'),
         'url':             request_data.get('url', '/'),
-        'ip':              request_data.get('ip', '0.0.0.0'),
+        'ip':              request_data.get('ip', '0.0.0.0'),  # nosec B104 — default for missing field, not a bind address
         'decision':        'ALLOW',
         'confidence':      1.0,
         'attack_type':     'normal',

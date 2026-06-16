@@ -117,7 +117,7 @@ The dashboard shows a progress bar during the initial learning phase (0→200 sa
 | File | Relationship |
 |---|---|
 | `app/waf_engine.py` | Stage 9: calls `baseline.score(features, request)` for anomaly scoring; calls `baseline.learn(features, request)` for every allowed request |
-| `app/main.py` | `POST /learn/toggle` calls `waf_engine.set_learning(bool)`; `POST /learn/save` is not yet exposed as a route — save is triggered via the dashboard or can be added |
+| `app/main.py` | `POST /learn/toggle` calls `waf_engine.set_learning(bool)`; `POST /learn/save` persists the baseline to `models/unsupervised_baseline.pkl` |
 | `ml/feature_extractor.py` | The same 75-dim feature vector used by the supervised model is also fed to the Isolation Forest |
 | `static/index.html` | Displays `unsupervised_score`, `path_rarity`, and `method_rarity` in the event detail modal |
 | `models/unsupervised_baseline.pkl` | On-disk serialized baseline state (pickle format, protocol 4) |

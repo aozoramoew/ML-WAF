@@ -44,7 +44,7 @@ When a request arrives, `api_discovery.record()` compares it against the known s
 
 ## Integration in the Pipeline
 
-This module runs at the **very end** of `waf_engine.analyze()`. Unlike other stages, it always runs, even if the request was blocked by an earlier stage. This ensures that the WAF maintains a complete picture of both legitimate usage and attacker reconnaissance.
+This module runs at the **very end** of `waf_engine.analyze()`, and only for requests that were **not blocked** by an earlier stage. Blocked requests short-circuit the pipeline via early `return` in `waf_engine.py`, so Stage 10 is never reached for them. This means the endpoint inventory reflects legitimate traffic only — attacker reconnaissance probes that get blocked do not pollute the schema model.
 
 ---
 

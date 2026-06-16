@@ -1,4 +1,4 @@
-"""
+﻿"""
 Synthetic HTTP dataset generator — three-dataset fusion:
 
   1. CSIC 2010 style (e-commerce, included via parse_csic_2010)
@@ -25,7 +25,7 @@ Attack coverage:
 
 import re
 import json
-import random
+import random  # nosec B311 — used for synthetic training data generation, not cryptography
 import string
 import pandas as pd
 from typing import List, Dict, Optional
@@ -363,11 +363,11 @@ ATTACK_PARAMS = [
 
 
 def _rand_ip() -> str:
-    return f"{random.randint(1,254)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,254)}"
+    return f"{random.randint(1,254)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,254)}"  # nosec B311
 
 
 def _rand_str(n=8):
-    return ''.join(random.choices(string.ascii_lowercase, k=n))
+    return ''.join(random.choices(string.ascii_lowercase, k=n))  # nosec B311
 
 
 def _rand_email():
@@ -375,18 +375,18 @@ def _rand_email():
 
 
 def _rand_session():
-    return ''.join(random.choices(string.hexdigits, k=32))
+    return ''.join(random.choices(string.hexdigits, k=32))  # nosec B311
 
 
 def _normal_headers(json_body=False):
     h = {
-        'User-Agent': random.choice(NORMAL_UAS),
+        'User-Agent': random.choice(NORMAL_UAS),  # nosec B311
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
     }
-    if random.random() > 0.3:
-        h['Referer'] = f'http://localhost{random.choice(NORMAL_PATHS)}'
-    if random.random() > 0.3:
+    if random.random() > 0.3:  # nosec B311
+        h['Referer'] = f'http://localhost{random.choice(NORMAL_PATHS)}'  # nosec B311
+    if random.random() > 0.3:  # nosec B311
         h['Cookie'] = f'JSESSIONID={_rand_session()}'
         
     if json_body:
@@ -397,31 +397,31 @@ def _normal_headers(json_body=False):
 def _attack_headers():
     h = _normal_headers(json_body=False)
     # 20% chance to have a suspicious scanner user-agent
-    if random.random() < 0.2:
+    if random.random() < 0.2:  # nosec B311
         ua_pool = [
             'sqlmap/1.7.8#stable', 'python-requests/2.28', 'Nikto/2.1.6',
             'curl/7.68.0', 'OWASP-Scanner/1.0', 'dirbuster/1.0',
             '', 'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)'
         ]
-        h['User-Agent'] = random.choice(ua_pool)
+        h['User-Agent'] = random.choice(ua_pool)  # nosec B311
     return h
 
 
 # ── Normal request generator ──────────────────────────────────────────────────
 def _gen_normal() -> Dict:
-    method = random.choices(['GET', 'POST', 'PUT', 'DELETE'], weights=[60, 30, 5, 5])[0]
-    path = random.choice(NORMAL_PATHS)
-    is_json = random.random() > 0.6
+    method = random.choices(['GET', 'POST', 'PUT', 'DELETE'], weights=[60, 30, 5, 5])[0]  # nosec B311
+    path = random.choice(NORMAL_PATHS)  # nosec B311
+    is_json = random.random() > 0.6  # nosec B311
 
     params, body = '', ''
-    if method == 'GET' and random.random() > 0.4:
-        chosen = random.sample(NORMAL_PARAMS_GET, k=random.randint(1, 3))
+    if method == 'GET' and random.random() > 0.4:  # nosec B311
+        chosen = random.sample(NORMAL_PARAMS_GET, k=random.randint(1, 3))  # nosec B311
         params = '?' + '&'.join(chosen)
     elif method in ('POST', 'PUT'):
-        tpl = random.choice(NORMAL_BODIES_POST)
+        tpl = random.choice(NORMAL_BODIES_POST)  # nosec B311
         body = tpl.format(
             name=_rand_str(), last=_rand_str(), email=_rand_email(),
-            user=_rand_str(6), pwd=_rand_str(10), id=random.randint(1, 99),
+            user=_rand_str(6), pwd=_rand_str(10), id=random.randint(1, 99),  # nosec B311
         )
 
     return {
@@ -433,10 +433,10 @@ def _gen_normal() -> Dict:
 
 # ── CSIC 2010 + classic SQLi ──────────────────────────────────────────────────
 def _gen_sqli() -> Dict:
-    payload = random.choice(SQLI_PAYLOADS)
-    param = random.choice(ATTACK_PARAMS)
-    method = random.choices(['GET', 'POST'], weights=[60, 40])[0]
-    path = random.choice(NORMAL_PATHS)
+    payload = random.choice(SQLI_PAYLOADS)  # nosec B311
+    param = random.choice(ATTACK_PARAMS)  # nosec B311
+    method = random.choices(['GET', 'POST'], weights=[60, 40])[0]  # nosec B311
+    path = random.choice(NORMAL_PATHS)  # nosec B311
 
     url, body = path, ''
     if method == 'GET':
@@ -453,9 +453,9 @@ def _gen_sqli() -> Dict:
 
 # ── OWASP Juice Shop attack generator ────────────────────────────────────────
 def _gen_juice_shop_sqli() -> Dict:
-    payload = random.choice(JUICE_SHOP_SQLI)
-    method = random.choices(['GET', 'POST'], weights=[50, 50])[0]
-    path = random.choice([
+    payload = random.choice(JUICE_SHOP_SQLI)  # nosec B311
+    method = random.choices(['GET', 'POST'], weights=[50, 50])[0]  # nosec B311
+    path = random.choice([  # nosec B311
         '/rest/products/search', '/rest/user/login',
         '/api/challenges', '/api/users', '/rest/basket',
     ])
@@ -464,7 +464,7 @@ def _gen_juice_shop_sqli() -> Dict:
     if method == 'GET':
         url = f"{path}?q={payload}"
     else:
-        body = json.dumps({"email": payload, "password": "anything"})
+        body = json.dumps({"email": payload, "password": "anything"})  # nosec B105 — simulated attack payload, not a real credential
 
     return {
         'method': method, 'url': url,
@@ -474,15 +474,15 @@ def _gen_juice_shop_sqli() -> Dict:
 
 
 def _gen_juice_shop_xss() -> Dict:
-    payload = random.choice(JUICE_SHOP_XSS + XSS_PAYLOADS)
-    method = random.choices(['GET', 'POST'], weights=[60, 40])[0]
-    path = random.choice([
+    payload = random.choice(JUICE_SHOP_XSS + XSS_PAYLOADS)  # nosec B311
+    method = random.choices(['GET', 'POST'], weights=[60, 40])[0]  # nosec B311
+    path = random.choice([  # nosec B311
         '/rest/products/search', '/api/feedbacks',
         '/api/complaints', '/search', '/comment',
     ])
 
     url, body = path, ''
-    param = random.choice(['q', 'search', 'comment', 'message', 'feedback'])
+    param = random.choice(['q', 'search', 'comment', 'message', 'feedback'])  # nosec B311
     if method == 'GET':
         url = f"{path}?{param}={payload}"
     else:
@@ -496,8 +496,8 @@ def _gen_juice_shop_xss() -> Dict:
 
 
 def _gen_idor() -> Dict:
-    path = random.choice(IDOR_PATHS)
-    method = random.choices(['GET', 'PUT', 'DELETE'], weights=[70, 20, 10])[0]
+    path = random.choice(IDOR_PATHS)  # nosec B311
+    method = random.choices(['GET', 'PUT', 'DELETE'], weights=[70, 20, 10])[0]  # nosec B311
     return {
         'method': method, 'url': path,
         'headers': _attack_headers(),
@@ -507,10 +507,10 @@ def _gen_idor() -> Dict:
 
 # ── HTTPParams dataset ────────────────────────────────────────────────────────
 def _gen_http_params() -> Dict:
-    payload = random.choice(HTTP_PARAMS_FUZZING)
-    param = random.choice(ATTACK_PARAMS)
-    path = random.choice(NORMAL_PATHS)
-    method = random.choices(['GET', 'POST'], weights=[50, 50])[0]
+    payload = random.choice(HTTP_PARAMS_FUZZING)  # nosec B311
+    param = random.choice(ATTACK_PARAMS)  # nosec B311
+    path = random.choice(NORMAL_PATHS)  # nosec B311
+    method = random.choices(['GET', 'POST'], weights=[50, 50])[0]  # nosec B311
 
     url, body = path, ''
     if method == 'GET':
@@ -527,9 +527,9 @@ def _gen_http_params() -> Dict:
 
 # ── NoSQL Injection generator ─────────────────────────────────────────────────
 def _gen_nosql() -> Dict:
-    payload = random.choice(NOSQL_INJECTION_PAYLOADS)
-    method = random.choices(['GET', 'POST'], weights=[40, 60])[0]
-    path = random.choice([
+    payload = random.choice(NOSQL_INJECTION_PAYLOADS)  # nosec B311
+    method = random.choices(['GET', 'POST'], weights=[40, 60])[0]  # nosec B311
+    path = random.choice([  # nosec B311
         '/api/users/login', '/rest/user/login', '/login',
         '/api/auth', '/graphql', '/api/query',
     ])
@@ -549,8 +549,8 @@ def _gen_nosql() -> Dict:
 
 # ── JWT Abuse generator ───────────────────────────────────────────────────────
 def _gen_jwt_abuse() -> Dict:
-    jwt_token = random.choice(JWT_ABUSE_PAYLOADS)
-    path = random.choice([
+    jwt_token = random.choice(JWT_ABUSE_PAYLOADS)  # nosec B311
+    path = random.choice([  # nosec B311
         '/rest/user/whoami', '/api/users/me', '/admin',
         '/api/challenges', '/rest/basket', '/api/orders',
     ])
@@ -566,10 +566,10 @@ def _gen_jwt_abuse() -> Dict:
 
 # ── SSRF generator ────────────────────────────────────────────────────────────
 def _gen_ssrf() -> Dict:
-    payload = random.choice(SSRF_PAYLOADS)
-    param = random.choice(['url', 'redirect', 'callback', 'next', 'target', 'src', 'host', 'proxy'])
-    path = random.choice(['/api/fetch', '/proxy', '/redirect', '/api/webhook', '/download'])
-    method = random.choices(['GET', 'POST'], weights=[60, 40])[0]
+    payload = random.choice(SSRF_PAYLOADS)  # nosec B311
+    param = random.choice(['url', 'redirect', 'callback', 'next', 'target', 'src', 'host', 'proxy'])  # nosec B311
+    path = random.choice(['/api/fetch', '/proxy', '/redirect', '/api/webhook', '/download'])  # nosec B311
+    method = random.choices(['GET', 'POST'], weights=[60, 40])[0]  # nosec B311
 
     url, body = path, ''
     if method == 'GET':
@@ -586,8 +586,8 @@ def _gen_ssrf() -> Dict:
 
 # ── XXE generator ─────────────────────────────────────────────────────────────
 def _gen_xxe() -> Dict:
-    payload = random.choice(XXE_PAYLOADS)
-    path = random.choice(['/api/upload', '/api/parse', '/api/xml', '/import', '/convert'])
+    payload = random.choice(XXE_PAYLOADS)  # nosec B311
+    path = random.choice(['/api/upload', '/api/parse', '/api/xml', '/import', '/convert'])  # nosec B311
     return {
         'method': 'POST', 'url': path,
         'headers': {**_attack_headers(), 'Content-Type': 'application/xml'},
@@ -597,10 +597,10 @@ def _gen_xxe() -> Dict:
 
 # ── XSS generator ────────────────────────────────────────────────────────────
 def _gen_xss() -> Dict:
-    payload = random.choice(XSS_PAYLOADS)
-    param = random.choice(['q', 'search', 'comment', 'name', 'input', 'msg'])
-    method = random.choices(['GET', 'POST'], weights=[50, 50])[0]
-    path = random.choice(['/search', '/comment', '/feedback', '/api/posts', '/tienda1/publico/pagar.jsp'])
+    payload = random.choice(XSS_PAYLOADS)  # nosec B311
+    param = random.choice(['q', 'search', 'comment', 'name', 'input', 'msg'])  # nosec B311
+    method = random.choices(['GET', 'POST'], weights=[50, 50])[0]  # nosec B311
+    path = random.choice(['/search', '/comment', '/feedback', '/api/posts', '/tienda1/publico/pagar.jsp'])  # nosec B311
 
     url, body = path, ''
     if method == 'GET':
@@ -610,32 +610,32 @@ def _gen_xss() -> Dict:
 
     return {
         'method': method, 'url': url,
-        'headers': {'User-Agent': random.choice(NORMAL_UAS)},
+        'headers': {'User-Agent': random.choice(NORMAL_UAS)},  # nosec B311
         'body': body, 'ip': _rand_ip(), 'label': 1, 'attack_type': 'xss',
     }
 
 
 # ── Path Traversal generator ─────────────────────────────────────────────────
 def _gen_path_traversal() -> Dict:
-    payload = random.choice(PATH_TRAVERSAL_PAYLOADS)
-    param = random.choice(['file', 'path', 'name', 'doc', 'resource', 'template'])
-    path = random.choice(['/download', '/file', '/static', '/api/files', '/docs', '/view'])
+    payload = random.choice(PATH_TRAVERSAL_PAYLOADS)  # nosec B311
+    param = random.choice(['file', 'path', 'name', 'doc', 'resource', 'template'])  # nosec B311
+    path = random.choice(['/download', '/file', '/static', '/api/files', '/docs', '/view'])  # nosec B311
     url = f"{path}?{param}={payload}"
 
     return {
         'method': 'GET', 'url': url,
-        'headers': {'User-Agent': random.choice(NORMAL_UAS)},
+        'headers': {'User-Agent': random.choice(NORMAL_UAS)},  # nosec B311
         'body': '', 'ip': _rand_ip(), 'label': 1, 'attack_type': 'path_traversal',
     }
 
 
 # ── Command Injection generator ───────────────────────────────────────────────
 def _gen_cmd_injection() -> Dict:
-    payload = random.choice(CMD_INJECTION_PAYLOADS)
-    param = random.choice(['host', 'cmd', 'ip', 'target', 'exec', 'command'])
-    path = random.choice(['/ping', '/api/nslookup', '/tools/check', '/admin/exec'])
+    payload = random.choice(CMD_INJECTION_PAYLOADS)  # nosec B311
+    param = random.choice(['host', 'cmd', 'ip', 'target', 'exec', 'command'])  # nosec B311
+    path = random.choice(['/ping', '/api/nslookup', '/tools/check', '/admin/exec'])  # nosec B311
 
-    method = random.choices(['GET', 'POST'], weights=[50, 50])[0]
+    method = random.choices(['GET', 'POST'], weights=[50, 50])[0]  # nosec B311
     url, body = path, ''
     if method == 'GET':
         url = f"{path}?{param}=localhost{payload}"
@@ -644,7 +644,7 @@ def _gen_cmd_injection() -> Dict:
 
     return {
         'method': method, 'url': url,
-        'headers': {'User-Agent': random.choice(NORMAL_UAS)},
+        'headers': {'User-Agent': random.choice(NORMAL_UAS)},  # nosec B311
         'body': body, 'ip': _rand_ip(), 'label': 1, 'attack_type': 'cmd_injection',
     }
 
@@ -699,7 +699,7 @@ def generate_dataset(
         for _ in range(count):
             rows.append(gen_fn())
 
-    random.shuffle(rows)
+    random.shuffle(rows)  # nosec B311
     df = pd.DataFrame(rows)
     print(f"  Total: {len(df)} samples  ({df[df['label']==1].shape[0]} malicious, {df[df['label']==0].shape[0]} benign)")
     return df
@@ -804,7 +804,7 @@ SCANNER_UAS = [
 def _randomize_case(text: str) -> str:
     """Randomly upper/lower-case characters within SQL/XSS keywords (e.g. UnIoN SeLeCt)."""
     def _mix(match):
-        return ''.join(random.choice((c.upper(), c.lower())) for c in match.group(0))
+        return ''.join(random.choice((c.upper(), c.lower())) for c in match.group(0))  # nosec B311
     return SQL_XSS_KEYWORDS_RE.sub(_mix, text)
 
 
@@ -828,8 +828,8 @@ def _pad_with_comments(text: str) -> str:
     if not text:
         return text
     paddings = ['/**/', '  ', '/*comment*/', ' /*x*/']
-    pos = random.randint(0, len(text))
-    return text[:pos] + random.choice(paddings) + text[pos:]
+    pos = random.randint(0, len(text))  # nosec B311
+    return text[:pos] + random.choice(paddings) + text[pos:]  # nosec B311
 
 
 def _reorder_params(url_or_body: str) -> str:
@@ -842,7 +842,7 @@ def _reorder_params(url_or_body: str) -> str:
     else:
         prefix, query, sep = '', url_or_body, ''
     parts = query.split('&')
-    random.shuffle(parts)
+    random.shuffle(parts)  # nosec B311
     return f'{prefix}{sep}{"&".join(parts)}' if sep else '&'.join(parts)
 
 
@@ -870,9 +870,9 @@ def augment_labeled_samples(samples: List[Dict], variants_per_sample: int = 5) -
             body = sample.get('body', '') or ''
             headers = dict(sample.get('headers', {}) or {})
 
-            transform = random.random()
+            transform = random.random()  # nosec B311
             if transform < 0.25:
-                url = _url_encode_query(url, double=random.random() < 0.3)
+                url = _url_encode_query(url, double=random.random() < 0.3)  # nosec B311
             elif transform < 0.5:
                 url = _randomize_case(url)
                 body = _randomize_case(body)
@@ -886,10 +886,10 @@ def augment_labeled_samples(samples: List[Dict], variants_per_sample: int = 5) -
                 else:
                     url = _reorder_params(url)
 
-            if label == 1 and random.random() < 0.3:
-                headers['User-Agent'] = random.choice(SCANNER_UAS)
+            if label == 1 and random.random() < 0.3:  # nosec B311
+                headers['User-Agent'] = random.choice(SCANNER_UAS)  # nosec B311
             else:
-                headers['User-Agent'] = random.choice(NORMAL_UAS)
+                headers['User-Agent'] = random.choice(NORMAL_UAS)  # nosec B311
 
             augmented.append({
                 'method': sample.get('method', 'GET'),

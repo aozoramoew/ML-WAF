@@ -55,7 +55,7 @@ CMD_INJECTION_PATTERNS = [
     '`ls`', '`id`', '$(id)', '$(ls)', '; id', '| id',
     '; whoami', 'nc -', 'wget http', 'curl http',
     '/bin/sh', '/bin/bash', 'cmd.exe', 'powershell',
-    '; uname', 'ping -c', '| nc', '/tmp/shell',
+    '; uname', 'ping -c', '| nc', '/tmp/shell',  # nosec B108 — string literal in detection pattern list, not a temp file path
 ]
 
 NOSQL_PATTERNS = [
@@ -71,7 +71,7 @@ SSRF_PATTERNS = [
     'metadata.google.internal',
     '100.100.100.200',  # Alibaba metadata
     '192.168.', '10.0.', '172.16.', '172.17.',  # private networks
-    '127.0.0.1', 'localhost', '0.0.0.0',
+    '127.0.0.1', 'localhost', '0.0.0.0',  # nosec B104 — SSRF detection pattern string, not a bind address
     'file://', 'dict://', 'gopher://', 'ldap://', 'ftp://',
     '0x7f', '2130706433',  # hex/decimal for 127.0.0.1
 ]

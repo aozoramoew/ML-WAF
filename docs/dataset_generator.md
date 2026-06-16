@@ -26,7 +26,7 @@ These are the default counts produced by `generate_dataset()`:
 | SSRF | 300 | Cloud metadata, private IPs, non-HTTP protocols |
 | XXE | 200 | XML external entity injection |
 
-**Synthetic total: ~13,800 samples** (7,300 malicious + 6,000 benign, then shuffled)
+**Synthetic total: ~13,800 samples** (7,800 malicious + 6,000 benign, then shuffled)
 
 When real CSIC 2010 files are present in `data/`, `train.py` loads them in addition to the synthetic set, bringing the total training corpus to ~110,000+ samples.
 

@@ -117,6 +117,7 @@ Training runs in a FastAPI `BackgroundTask` (a threadpool task, not a subprocess
 - `POST /ml/retrain` — Trigger background retraining (auto-reloads when done)
 - `POST /ml/upload_labeled` — Upload labeled requests (JSON/JSONL/CSV) to augment training
 - `POST /learn/toggle` — Pause/resume unsupervised Isolation Forest learning
+- `POST /learn/save` — Persist the current baseline to `models/unsupervised_baseline.pkl`
 
 ### Simulation
 - `POST /simulate/start` — Start background simulation

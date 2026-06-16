@@ -69,7 +69,7 @@ def _velocity_check(ip: str, path: str) -> tuple[bool, str]:
 
 def check(request_data: dict) -> dict:
     """Evaluate a request for bot / scanner characteristics."""
-    ip      = request_data.get('ip', '0.0.0.0')
+    ip      = request_data.get('ip', '0.0.0.0')  # nosec B104 — default for missing field, not a bind address
     url     = request_data.get('url', '/')
     headers = {k.lower(): v for k, v in (request_data.get('headers') or {}).items()}
     ua      = headers.get('user-agent', '')

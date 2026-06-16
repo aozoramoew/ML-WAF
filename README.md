@@ -358,6 +358,6 @@ Each source file has a companion markdown document:
 | Crowd intelligence | CrowdSec integration | Simulated crowd wisdom module |
 | API discovery | Yes | Yes (passive endpoint mapper) |
 | Real-time learning | Yes | Yes (Isolation Forest online learning) |
-| IPS signatures | 2,800+ CVEs (Premium) | ~17 hand-picked CVEs including Log4Shell, Text4Shell |
+| IPS signatures | 2,800+ CVEs (Premium) | ~18 hand-picked CVEs including Log4Shell, Text4Shell |
 | File security | Premium feature | Implemented (magic bytes, EICAR, dangerous extensions) |
 | ML metrics (realistic) | Not published | AUC 0.997, Accuracy 97.3% on CSIC 2010 |

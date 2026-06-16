@@ -12,7 +12,7 @@ This replicates the open-appsec "unsupervised model" concept:
 """
 
 import json
-import pickle
+import pickle  # nosec B403 — reads only app-written baseline file, never untrusted external data
 import hashlib
 import numpy as np
 from pathlib import Path
@@ -229,7 +229,7 @@ class BaselineModel:
 
         try:
             with open(load_path, 'rb') as f:
-                state = pickle.load(f)
+                state = pickle.load(f)  # nosec B301 — file is only ever written by this application, never from untrusted input
 
             config = state.get('config', {})
             obj = cls(

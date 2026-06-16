@@ -79,7 +79,7 @@ async def _crowdsec_lookup(ip: str) -> Optional[dict]:
             data = resp.json()
             _cache[ip] = (data, time.time() + CACHE_TTL)
             return data
-    except Exception:
+    except Exception:  # nosec B110 — intentional fail-open: WAF must not block if reputation API is down
         pass   # Fail open — don't block if API is unreachable
     return None
 
@@ -89,7 +89,7 @@ async def check(request_data: dict) -> dict:
     Async crowd wisdom check.
     Returns block=True if IP is known-malicious.
     """
-    ip = request_data.get('ip', '0.0.0.0')
+    ip = request_data.get('ip', '0.0.0.0')  # nosec B104 — default for missing field, not a bind address
 
     # ── 1. Offline blocklist (always fast) ───────────────────────────
     if _in_offline_blocklist(ip):

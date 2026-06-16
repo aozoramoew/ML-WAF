@@ -204,8 +204,8 @@ async def run_simulation(
         if not _running:
             break
 
-        method, url, extra_headers, body = random.choice(payloads) if scenario != 'full_dataset' else payloads[i]
-        ip = random.choice(_IPS)
+        method, url, extra_headers, body = random.choice(payloads) if scenario != 'full_dataset' else payloads[i]  # nosec B311 — simulation only, not crypto
+        ip = random.choice(_IPS)  # nosec B311 — simulation only, not crypto
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -225,7 +225,7 @@ async def run_simulation(
         try:
             result = await analyze_fn(req)
             await broadcast_fn({'type': 'request', 'data': _slim(result)})
-        except Exception as e:
+        except Exception as e:  # nosec B110 — intentional: simulator must never crash the server
             pass   # Never crash the simulator
 
         if delay > 0:

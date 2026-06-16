@@ -39,7 +39,7 @@ def check(request_data: dict) -> dict:
         dict with keys: block (bool), reason (str), requests_in_window (int),
                         limit (int), window_seconds (int), retry_after (int)
     """
-    ip  = request_data.get('ip', '0.0.0.0')
+    ip  = request_data.get('ip', '0.0.0.0')  # nosec B104 — default for missing field, not a bind address
     url = request_data.get('url', '/')
     now = time.time()
 
