@@ -16,6 +16,6 @@ EXPOSE 8000
 ENV ENVIRONMENT=production \
     PORT=8000
 
-# Shell form so $PORT is expanded at container runtime.
-# Hosting platforms (Railway, Render, Fly.io, etc.) inject PORT automatically.
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Train model on first boot if waf_model.pkl is absent (not committed to git).
+# On subsequent restarts the existing pkl is reused — training is skipped.
+CMD ["sh", "-c", "[ -f models/waf_model.pkl ] || python -m ml.train && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

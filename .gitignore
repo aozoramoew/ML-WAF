@@ -37,10 +37,9 @@ venv.bak/
 ml-waf/
 
 # ── Trained models (large binary files — retrain on deploy) ──────────────────
-# Uncomment these if you do NOT want to commit the trained model to git.
-# If you want to ship a pre-trained model, keep them commented out.
-# models/waf_model.pkl
-# models/baseline.pkl
+# Too large for GitHub (108 MB). The start command runs ml.train before uvicorn.
+models/waf_model.pkl
+models/unsupervised_baseline.pkl
 
 # ── Datasets (download separately — see .env.example) ────────────────────────
 data/normalTrafficTraining.txt
