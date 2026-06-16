@@ -48,6 +48,52 @@ NORMAL_PATHS = [
     '/assets/public/images/products/',
 ]
 
+# Modern SPA / REST API paths (chat apps, dashboards, auth flows)
+MODERN_NORMAL_PATHS = [
+    '/api/auth/login', '/api/auth/register', '/api/auth/logout', '/api/auth/me',
+    '/api/auth/refresh', '/api/auth/verify', '/api/auth/forgot-password',
+    '/api/users/profile', '/api/users/settings', '/api/users/avatar',
+    '/api/messages', '/api/messages/inbox', '/api/messages/sent',
+    '/api/chat/rooms', '/api/chat/messages', '/api/chat/members',
+    '/api/notifications', '/api/notifications/read',
+    '/api/search', '/api/feed', '/api/timeline',
+    '/api/v1/health', '/api/v1/status', '/api/v2/users',
+    '/health', '/healthz', '/status', '/metrics',
+    '/login', '/register', '/forgot-password', '/reset-password',
+    '/dashboard', '/inbox', '/profile', '/settings',
+    '/static/main.js', '/static/app.css', '/static/bundle.js',
+    '/favicon.ico', '/manifest.json', '/robots.txt',
+]
+
+# Random-looking hostnames typical of PaaS deployments (Railway, Render, Heroku, etc.)
+# These produce higher url_entropy — model must learn they are normal
+MODERN_DOMAINS = [
+    'web-production-ce7b.up.railway.app',
+    'my-app-abc123.up.railway.app',
+    'secure-im-prod.onrender.com',
+    'myapp-xyz789.herokuapp.com',
+    'api-prod-a1b2c3.vercel.app',
+    'backend.mycompany.io',
+    'api.myapp.com',
+    'app.example.com',
+    '',  # relative URL (no domain) — most common training case
+    '',  # weight relative URLs more
+    '',
+]
+
+MODERN_NORMAL_BODIES = [
+    '{{"username":"{user}","password":"{pwd}","device_id":"{did}","device_name":"{dn}"}}',
+    '{{"email":"{email}","password":"{pwd}"}}',
+    '{{"email":"{email}","password":"{pwd}","confirm_password":"{pwd}"}}',
+    '{{"refresh_token":"{tok}"}}',
+    '{{"username":"{user}","bio":"Hello I am {user}","avatar_url":""}}',
+    '{{"room_id":"{did}","content":"Hello there","message_type":"text"}}',
+    '{{"recipient_id":"{did}","message":"Hi how are you?"}}',
+    '{{"page":1,"limit":20,"sort":"created_at"}}',
+    '{{"query":"{user}","type":"user"}}',
+    '{{"notification_ids":["{did}","{tok}"]}}',
+]
+
 NORMAL_PARAMS_GET = [
     'id=1', 'page=2', 'limit=20', 'sort=price', 'category=libros',
     'q=camiseta', 'color=azul', 'talla=M', 'precio=1', 'codigo=abc123',
@@ -431,6 +477,57 @@ def _gen_normal() -> Dict:
     }
 
 
+# ── Modern SPA / REST API normal traffic ─────────────────────────────────────
+def _gen_modern_normal() -> Dict:
+    """Normal traffic for modern web apps: PaaS domains, JSON auth APIs, SPA paths.
+
+    Specifically covers the false-positive pattern where high url_entropy from
+    random-looking PaaS hostnames (e.g. web-production-ce7b.up.railway.app) causes
+    the model to misclassify legitimate GET /login requests as attacks.
+    """
+    method = random.choices(['GET', 'POST', 'PUT', 'DELETE'], weights=[55, 35, 6, 4])[0]  # nosec B311
+    path = random.choice(MODERN_NORMAL_PATHS)  # nosec B311
+    domain = random.choice(MODERN_DOMAINS)  # nosec B311
+    url = f'https://{domain}{path}' if domain else path
+
+    body = ''
+    if method in ('POST', 'PUT'):
+        tpl = random.choice(MODERN_NORMAL_BODIES)  # nosec B311
+        body = tpl.format(
+            user=_rand_str(6), pwd=_rand_str(12), email=_rand_email(),
+            did=_rand_str(8), dn=f'{_rand_str(4)}-device',
+            tok=_rand_session(),
+        )
+
+    params = ''
+    if method == 'GET' and random.random() > 0.6:  # nosec B311
+        chosen = random.sample(NORMAL_PARAMS_GET, k=random.randint(1, 2))  # nosec B311
+        params = '?' + '&'.join(chosen)
+
+    headers = {
+        'User-Agent': random.choice(NORMAL_UAS),  # nosec B311
+        'Accept': random.choice([  # nosec B311
+            'application/json',
+            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            '*/*',
+        ]),
+        'Accept-Language': random.choice(['en-US,en;q=0.9', 'en-GB,en;q=0.8', 'vi-VN,vi;q=0.9']),  # nosec B311
+        'Accept-Encoding': 'gzip, deflate, br',
+    }
+    if body:
+        headers['Content-Type'] = 'application/json'
+    if random.random() > 0.5:  # nosec B311
+        headers['Connection'] = 'keep-alive'
+    if random.random() > 0.7:  # nosec B311
+        headers['Upgrade-Insecure-Requests'] = '1'
+
+    return {
+        'method': method, 'url': url + params,
+        'headers': headers, 'body': body,
+        'ip': _rand_ip(), 'label': 0, 'attack_type': 'normal',
+    }
+
+
 # ── CSIC 2010 + classic SQLi ──────────────────────────────────────────────────
 def _gen_sqli() -> Dict:
     payload = random.choice(SQLI_PAYLOADS)  # nosec B311
@@ -652,6 +749,7 @@ def _gen_cmd_injection() -> Dict:
 # ── Main generator ────────────────────────────────────────────────────────────
 def generate_dataset(
     n_normal: int = 6000,
+    n_modern_normal: int = 1500,
     # CSIC 2010 style
     n_sqli: int = 1500,
     n_xss: int = 1500,
@@ -671,11 +769,12 @@ def generate_dataset(
 ) -> pd.DataFrame:
     """Generate a complete synthetic HTTP security dataset (3-dataset fusion)."""
     print("[Dataset] Generating multi-dataset synthetic traffic...")
-    print("  Sources: CSIC 2010 style + OWASP Juice Shop + HTTPParams fuzzing")
+    print("  Sources: CSIC 2010 style + OWASP Juice Shop + HTTPParams fuzzing + Modern SPA")
     rows = []
 
     generators = [
         (_gen_normal,          n_normal,          'normal'),
+        (_gen_modern_normal,   n_modern_normal,   'normal [modern-spa]'),
         # Dataset 1: CSIC 2010 style
         (_gen_sqli,            n_sqli,            'sqli'),
         (_gen_xss,             n_xss,             'xss'),
