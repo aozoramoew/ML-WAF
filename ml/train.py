@@ -177,6 +177,14 @@ def main():
         csic_normal = [args.csic_normal]
     else:
         csic_normal = [str(DATA_DIR / f) for f in NORMAL_CANDIDATES if (DATA_DIR / f).exists()]
+        # cisc_normalTraffic_*.txt are renamed copies of normalTrafficTraining/Test.txt —
+        # include only one copy of each to avoid double-counting.
+        if str(DATA_DIR / 'normalTrafficTraining.txt') in csic_normal \
+                and str(DATA_DIR / 'cisc_normalTraffic_train.txt') in csic_normal:
+            csic_normal.remove(str(DATA_DIR / 'cisc_normalTraffic_train.txt'))
+        if str(DATA_DIR / 'normalTrafficTest.txt') in csic_normal \
+                and str(DATA_DIR / 'cisc_normalTraffic_test.txt') in csic_normal:
+            csic_normal.remove(str(DATA_DIR / 'cisc_normalTraffic_test.txt'))
 
     if args.csic_attack:
         csic_attack = [args.csic_attack]
@@ -238,7 +246,7 @@ def main():
         fi = {k: round(v, 6) for k, v in pairs}
 
     # ── Save metrics ───────────────────────────────────────────────
-    # Attack type distribution in test set
+    # Attack type distribution across the full dataset (train + test)
     attack_dist: dict = {}
     for t in attack_types:
         attack_dist[t] = attack_dist.get(t, 0) + 1

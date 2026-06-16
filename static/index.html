@@ -388,10 +388,10 @@ pre{padding:18px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-hei
             </div>
             <div class="divider"></div>
             <div style="font-size:12px;color:var(--t3);margin-bottom:8px">DATASETS USED</div>
-            <div id="ml-tags" style="display:flex;gap:6px;flex-wrap:wrap">
-              <span class="dataset-tag" style="background:rgba(16,185,129,.1);color:var(--green);border:1px solid rgba(16,185,129,.2)">📊 CSIC 2010</span>
-              <span class="dataset-tag" style="background:rgba(245,158,11,.1);color:var(--yellow);border:1px solid rgba(245,158,11,.2)">🧃 OWASP Juice Shop</span>
-              <span class="dataset-tag" style="background:rgba(139,92,246,.1);color:var(--purple);border:1px solid rgba(139,92,246,.2)">🔧 HTTPParams Fuzzing</span>
+            <div id="ml-tags" style="display:flex;gap:6px;flex-wrap:wrap">—</div>
+            <div id="ml-dist-wrap" style="display:none;margin-top:10px">
+              <div style="font-size:11px;color:var(--t3);margin-bottom:6px">FULL DATASET BREAKDOWN (TRAIN + TEST)</div>
+              <div id="ml-dist"></div>
             </div>
             <div class="divider"></div>
             <button class="btn btn-p" onclick="retrainModel()" id="retrain-btn">🔄 Retrain Model</button>
@@ -872,6 +872,45 @@ async function loadML() {
     el('m-auc').textContent=d.auc!=null?d.auc.toFixed(4):'—';
     el('ml-model-name').textContent=d.model_name||'—'; el('ml-n-feat').textContent=d.n_features||'—';
     el('ml-n-train').textContent=(d.n_train||0).toLocaleString(); el('ml-n-test').textContent=(d.n_test||0).toLocaleString();
+    // Build dataset tags from attack_distribution + metadata
+    const dist=d.attack_distribution||{};
+    const totalSamples=(d.n_train||0)+(d.n_test||0);
+    const tagDefs=[
+      {key:'csic',  label:'📊 CSIC 2010',        show: !!d.used_real_csic,             bg:'rgba(16,185,129,.1)', color:'var(--green)',  border:'rgba(16,185,129,.2)'},
+      {key:'syn',   label:'⚙️ Synthetic (multi-attack)', show: true,                    bg:'rgba(99,102,241,.1)', color:'var(--blue)',   border:'rgba(99,102,241,.2)'},
+      {key:'juice', label:'🧃 OWASP Juice Shop',  show: !!(dist['sqli']||dist['idor']), bg:'rgba(245,158,11,.1)', color:'var(--yellow)', border:'rgba(245,158,11,.2)'},
+      {key:'http',  label:'🔧 HTTPParams Fuzzing', show: !!(dist['http_params']),       bg:'rgba(139,92,246,.1)', color:'var(--purple)', border:'rgba(139,92,246,.2)'},
+      {key:'custom',label:'📤 Custom Labeled',    show: !!(d.custom_samples>0),         bg:'rgba(236,72,153,.1)', color:'#ec4899',       border:'rgba(236,72,153,.2)'},
+    ];
+    const tagsHtml=tagDefs.filter(t=>t.show).map(t=>`<span class="dataset-tag" style="background:${t.bg};color:${t.color};border:1px solid ${t.border}">${t.label}</span>`).join('');
+    el('ml-tags').innerHTML=tagsHtml||'—';
+    // Tooltip: total sample breakdown
+    const attackTypes=Object.keys(dist).filter(k=>k!=='normal');
+    if(attackTypes.length>0){
+      el('ml-tags').title=`${totalSamples.toLocaleString()} total samples — ${attackTypes.length} attack categories`;
+    }
+    // Attack distribution breakdown bars
+    if(Object.keys(dist).length>0){
+      const distTotal=Object.values(dist).reduce((a,b)=>a+b,0);
+      const distMax=Math.max(...Object.values(dist));
+      const distLabel={normal:'Normal Traffic',sqli:'SQL Injection',xss:'XSS',path_traversal:'Path Traversal',cmd_injection:'Command Injection',nosql_injection:'NoSQL Injection',jwt_abuse:'JWT Abuse',ssrf:'SSRF',xxe:'XXE',idor:'IDOR',http_params:'HTTP Param Pollution'};
+      const distColor={normal:'var(--green)',sqli:'var(--red)',xss:'var(--yellow)',path_traversal:'var(--purple)',cmd_injection:'#f97316',nosql_injection:'var(--blue)',jwt_abuse:'#ec4899',ssrf:'#06b6d4',xxe:'#84cc16',idor:'#a78bfa',http_params:'#94a3b8'};
+      const sortedDist=Object.entries(dist).sort((a,b)=>b[1]-a[1]);
+      el('ml-dist').innerHTML=sortedDist.map(([k,v])=>{
+        const pct=(v/distTotal*100).toFixed(1);
+        const barW=(v/distMax*100).toFixed(1);
+        const color=distColor[k]||'var(--t2)';
+        const label=distLabel[k]||k.replace(/_/g,' ');
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <div style="width:120px;font-size:11px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${label}">${label}</div>
+          <div style="flex:1;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${barW}%;background:${color};border-radius:3px"></div>
+          </div>
+          <div style="width:70px;font-size:11px;color:var(--t3);text-align:right">${v.toLocaleString()} (${pct}%)</div>
+        </div>`;
+      }).join('');
+      el('ml-dist-wrap').style.display='block';
+    }
     const fi=d.feature_importances||{};
     const entries=Object.entries(fi).sort((a,b)=>b[1]-a[1]).slice(0,15);
     if(entries.length){const max=entries[0][1];el('feat-imp').innerHTML=entries.map(([n,v])=>`<div class="feat-row"><div class="feat-lbl">${n.replace(/_/g,' ')}</div><div class="feat-bg"><div class="feat-fill" style="width:${(v/max*100).toFixed(1)}%"></div></div><div class="feat-pct">${(v*100).toFixed(2)}%</div></div>`).join('');}

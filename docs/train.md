@@ -2,103 +2,116 @@
 
 ## Overview
 
-`train.py` is the **offline training script** that produces the `models/waf_model.pkl` file consumed by the live WAF engine. It combines real CSIC 2010 data (if available) with a diverse range of datasets (OWASP Juice Shop, HTTPParams, NoSQL/JWT/SSRF/XXE/IDOR datasets) and a massive mix of **normal, benign user traffic**. It extracts feature vectors from every sample and trains a Random Forest classifier. Mixing in actual normal requests ensures the model accurately identifies legitimate traffic and lets it pass through without false positives.
+`train.py` is the **offline training script** that produces the `models/waf_model.pkl` file consumed by the live WAF engine. It automatically discovers CSIC 2010 files in `data/`, combines them with a multi-source synthetic dataset, extracts feature vectors from every sample, and trains a binary classifier (benign vs. malicious). The best model between Random Forest and Gradient Boosting is selected by AUC and saved.
 
 Run it once before starting the server, or trigger it remotely via `POST /ml/retrain`.
+
+---
+
+## Data Sources
+
+| Source | How it's loaded |
+|---|---|
+| **CSIC 2010 normal** (`data/cisc_normalTraffic_train.txt`, `data/cisc_normalTraffic_test.txt`) | Auto-detected in `data/`; also accepts `--csic-normal` CLI flag |
+| **CSIC 2010 attack** (`data/cisc_anomalousTraffic_test.txt`) | Auto-detected in `data/`; also accepts `--csic-attack` CLI flag |
+| **Synthetic dataset** | Always generated via `dataset_generator.generate_dataset()` |
+| **Custom labeled data** | `data/custom_labeled.jsonl` — loaded via `POST /ml/upload_labeled` |
+
+Real CSIC 2010 files are preferred over synthetic-only training. When both a raw CSIC file (e.g., `normalTrafficTraining.txt`) and its `cisc_`-prefixed copy exist, only one is used to avoid double-counting.
 
 ---
 
 ## Training Pipeline
 
 ```
-1. Discover and fuse data sources
-   ├─ Real CSIC 2010 data (if available in data/)
-   ├─ OWASP Juice Shop payloads (XSS, auth bypass, SSRF)
-   ├─ HTTPParams fuzzing dataset (parameter pollution)
-   ├─ NoSQL/JWT/SSRF/XXE/IDOR synthetic datasets
-   └─ **Normal Traffic**: Actual user requests, benign simulated traffic, and known-good e-commerce patterns (mixed in heavily to ensure the ML detects actual requests and lets them pass through)
+1. Auto-discover CSIC 2010 files in data/
+   (falls back to synthetic-only if none found)
 
 2. Load and merge all requests into a unified list of dicts
    [{method, url, headers, body, label, attack_type}, ...]
+   Sources merged in order:
+     a. CSIC 2010 normal traffic  (label=0)
+     b. CSIC 2010 attack traffic  (label=1, attack_type='sqli')
+     c. Synthetic multi-category dataset
+     d. Custom uploaded labeled data (data/custom_labeled.jsonl)
 
 3. Feature extraction
-   For each request → feature_extractor.extract_features() → 75-dim vector
+   For each request → feature_extractor.extract_features() → 75-dim float32 vector
 
-4. Train/test split (80/20, stratified by class)
+4. Train/test split (80/20, stratified by label)
 
-5. Model training
-   ├─ Primary: RandomForestClassifier (n_estimators=300)
-   └─ Comparison: GradientBoostingClassifier (optional, slower)
+5. Model selection — both trained in parallel:
+   ├─ RandomForestClassifier (n_estimators=300, class_weight='balanced')
+   └─ GradientBoostingClassifier (n_estimators=200, max_depth=6, lr=0.1)
+   Best model chosen by AUC-ROC on the test split.
 
-6. Evaluation
+6. Evaluation (printed + saved)
    ├─ Accuracy, Precision, Recall, F1
    ├─ ROC-AUC score
-   ├─ Classification report by attack type
-   └─ Confusion matrix
+   └─ Classification report (per-class)
 
 7. Persist
-   ├─ models/waf_model.pkl  (sklearn Pipeline: scaler + classifier)
-   └─ models/metrics.json   (all metrics + feature importances + names)
+   ├─ models/waf_model.pkl   (winning classifier via joblib)
+   └─ models/metrics.json    (metrics + feature importances + data stats)
 ```
 
 ---
 
 ## Model Architecture
 
-The saved model is a **scikit-learn Pipeline**:
+The saved model is a **bare scikit-learn estimator** (not a Pipeline) — either `RandomForestClassifier` or `GradientBoostingClassifier`, whichever achieved the higher AUC on the test split. With the CSIC 2010 data included, Gradient Boosting typically wins.
 
+### Why no StandardScaler?
+
+Random Forest and Gradient Boosting are **tree-based** and scale-invariant — they split on thresholds, not distances, so scaling provides no benefit. No scaler is used.
+
+### Model hyperparameters
+
+**Random Forest** (baseline):
 ```python
-Pipeline([
-    ('scaler', StandardScaler()),
-    ('clf', RandomForestClassifier(
-        n_estimators=300,
-        max_depth=None,
-        min_samples_leaf=2,
-        class_weight='balanced',
-        n_jobs=-1,
-        random_state=42,
-    ))
-])
+RandomForestClassifier(
+    n_estimators=300,
+    max_depth=None,
+    min_samples_split=2,
+    min_samples_leaf=1,
+    max_features='sqrt',
+    class_weight='balanced',
+    n_jobs=-1,
+    random_state=42,
+)
 ```
 
-### Why Random Forest?
+**Gradient Boosting** (typically wins with real CSIC data):
+```python
+GradientBoostingClassifier(
+    n_estimators=200,
+    max_depth=6,
+    learning_rate=0.1,
+    subsample=0.8,
+    random_state=42,
+)
+```
 
-| Property | Relevance |
-|---|---|
-| **Handles mixed features** | Some features are counts (integers), some are ratios (0–1), some are binary flags. RF handles this without needing careful normalization. |
-| **Built-in feature importance** | We get `feature_importances_` for free, powering the dashboard's importance chart. |
-| **Fast inference** | A 300-tree forest can score one request in ~1ms. |
-| **Resistant to overfitting** | With 300 trees and `min_samples_leaf=2`, the model generalises well even on imbalanced datasets. |
-| **`class_weight='balanced'`** | Automatically upweights minority classes — critical because attack samples are often fewer than normal traffic. |
-
-### Why StandardScaler?
-
-Even though Random Forests are scale-invariant (they use thresholds, not distances), the scaler is included for two reasons:
-1. The same Pipeline object can be swapped for SVM or Logistic Regression without changing the downstream code.
-2. The scaler normalises features for potential future ensemble with the Isolation Forest (which is distance-based and *is* sensitive to scale).
+`class_weight='balanced'` in Random Forest automatically upweights minority classes (attacks), which is critical when real CSIC normal traffic outnumbers attack traffic.
 
 ---
 
-## Evaluation Outputs
+## Realistic Metrics (with CSIC 2010 data)
 
-After training, the script prints:
+When trained on the full dataset (real CSIC + synthetic), representative results:
 
 ```
-[Metrics] Test Set Results:
-  Accuracy:  99.8%
-  Precision: 99.9%
-  Recall:    99.7%
-  F1-Score:  99.8%
-  AUC-ROC:   1.0000
-
-[Report] Per-class:
-  normal          precision=1.00 recall=1.00 f1=1.00
-  sqli            precision=1.00 recall=1.00 f1=1.00
-  xss             precision=0.99 recall=1.00 f1=0.99
-  ...
+Best model: Gradient Boosting  (AUC=0.9968)
+  Accuracy : 97.33%
+  Precision: 98.78%
+  Recall   : 92.15%
+  F1-Score : 95.35%
+  AUC-ROC  : 0.9968
 ```
 
-> **Note on 100% metrics**: The synthetic dataset is generated with deterministic patterns, so the model memorises them perfectly. Real-world performance on live traffic will be lower — typically 95–99% precision depending on threshold tuning. The CSIC 2010 real data provides a more realistic benchmark.
+`models/metrics.json` records `used_real_csic: true` when CSIC files were included, and `custom_samples` with the count from `data/custom_labeled.jsonl`.
+
+> **Previous AUC=1.0 / 99.96% metrics were synthetic-only overfit.** Training on real CSIC data where normal and attack patterns genuinely overlap produces the realistic ~97% accuracy figures above. This is the correct benchmark to present.
 
 ---
 
@@ -106,44 +119,65 @@ After training, the script prints:
 
 ```json
 {
-  "model_name": "RandomForestClassifier",
-  "accuracy": 0.998,
-  "precision": 0.999,
-  "recall": 0.997,
-  "f1": 0.998,
-  "auc": 1.0,
-  "n_train": 11040,
-  "n_test": 2760,
+  "model_name": "Gradient Boosting",
+  "accuracy": 0.9733,
+  "precision": 0.9878,
+  "recall": 0.9215,
+  "f1": 0.9535,
+  "auc": 0.9968,
+  "n_train": 88692,
+  "n_test": 22174,
   "n_features": 75,
-  "feature_names": ["url_length", "url_entropy", ...],
+  "feature_names": ["url_length", "path_length", ...],
   "feature_importances": {
-    "url_entropy": 0.124,
     "sql_keyword_count": 0.089,
+    "url_entropy": 0.072,
     ...
   },
-  "attack_type_distribution": {"sqli": 2100, "xss": 1800, ...},
-  "used_real_csic": true
+  "attack_distribution": {"normal": 6000, "sqli": 2100, ...},
+  "used_real_csic": true,
+  "custom_samples": 0
 }
 ```
 
-This file is served by `GET /model/info` and rendered in the dashboard's ML Models tab.
+This file is served by `GET /model/info` and rendered in the dashboard's **ML Models** tab.
 
 ---
 
 ## How to Run
 
 ```bash
-# Minimal (synthetic data only):
+# Auto-detects CSIC files in data/ (recommended):
 python -m ml.train
 
-# With real CSIC 2010 dataset:
+# Explicit file paths:
 python -m ml.train \
-  --csic-normal data/normalTrafficTraining.txt \
-  --csic-attack data/anomalousTrafficTest.txt
+  --csic-normal data/cisc_normalTraffic_train.txt \
+  --csic-attack data/cisc_anomalousTraffic_test.txt
 
-# Trigger from dashboard (runs in FastAPI background task):
+# Trigger remotely from dashboard or API (background task):
 POST /ml/retrain
 ```
+
+CSIC files currently in `data/`:
+- `data/cisc_normalTraffic_train.txt`
+- `data/cisc_normalTraffic_test.txt`
+- `data/cisc_anomalousTraffic_test.txt`
+
+These are auto-detected; no CLI flags needed for a standard run.
+
+---
+
+## Custom Labeled Data Upload
+
+Site-specific labeled requests can be uploaded via `POST /ml/upload_labeled` (JSON/CSV/JSONL). They are:
+
+1. Validated (must have `label` field = 0 or 1)
+2. Augmented by `dataset_generator.augment_labeled_samples()` into 5× variants per sample
+3. Appended to `data/custom_labeled.jsonl`
+4. Loaded by `load_custom_labeled_data()` on the next `ml.train` run
+
+The `metrics.json` key `custom_samples` records how many were included.
 
 ---
 
@@ -152,18 +186,20 @@ POST /ml/retrain
 | File | Relationship |
 |---|---|
 | `ml/feature_extractor.py` | Provides `extract_features()` and `features_to_array()` |
-| `ml/dataset_generator.py` | Provides `generate_dataset()` and `parse_csic_2010()` |
-| `app/waf_engine.py` | Loads the trained `models/waf_model.pkl` at startup |
-| `app/main.py` | Triggers `subprocess.run([sys.executable, '-m', 'ml.train'])` via `/ml/retrain` |
+| `ml/dataset_generator.py` | Provides `generate_dataset()`, `parse_csic_2010()`, `augment_labeled_samples()` |
+| `app/waf_engine.py` | Loads the trained `models/waf_model.pkl` at startup (lazy) |
+| `app/main.py` | Triggers `subprocess.run([sys.executable, '-m', 'ml.train'])` via `POST /ml/retrain` |
+| `data/custom_labeled.jsonl` | Site-specific labeled data, written by `POST /ml/upload_labeled` |
 
 ---
 
 ## open-appsec Equivalent
 
 open-appsec trains its supervised model centrally on aggregated traffic from all deployments (crowd-sourced learning). The model is distributed as a binary update. This implementation trains locally. To replicate the crowd-sourced model, you would:
+
 1. Collect request logs from the live `/analyze` endpoint
 2. Label them (human review or user feedback)
-3. Merge with the existing training set
-4. Re-run `ml.train`
+3. Upload via `POST /ml/upload_labeled`
+4. Trigger `POST /ml/retrain`
 
 The `POST /ml/retrain` endpoint enables this loop without downtime.

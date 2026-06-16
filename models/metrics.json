@@ -175,5 +175,6 @@
     "ssrf": 300,
     "xxe": 200
   },
-  "used_real_csic": true
+  "used_real_csic": true,
+  "custom_samples": 0
 }

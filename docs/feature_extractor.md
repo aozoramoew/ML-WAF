@@ -2,9 +2,9 @@
 
 ## Overview
 
-`feature_extractor.py` solves the fundamental problem in ML-based security: **how do you turn a raw HTTP request into numbers that a classifier can reason about?**
+`feature_extractor.py` converts a raw HTTP request dictionary into a **fixed-length 75-dimensional float32 feature vector** that the Random Forest (or Gradient Boosting) classifier operates on.
 
-It takes a request dictionary (method, URL, headers, body, IP) and returns a fixed-length **75-dimensional numerical feature vector**. This vector is what the Random Forest actually operates on.
+The core function is `extract_features(request_data)` which returns a named dict of floats. `features_to_array(feature_dict)` then converts it to a numpy array in the stable canonical order defined by `FEATURE_NAMES`.
 
 ---
 
@@ -12,126 +12,217 @@ It takes a request dictionary (method, URL, headers, body, IP) and returns a fix
 
 A neural network could theoretically operate on raw bytes. But for a WAF use case, **hand-engineered features dramatically outperform raw representations** because:
 
-1. **Attack patterns are known** — we know SQLi uses `UNION SELECT`, XSS uses `<script>`, etc.
-2. **Generalisation** — a feature like `sql_keyword_count` catches both `UNION SELECT` and `union select` and `%55nion %53elect` (URL-encoded).
+1. **Attack patterns are known** — SQLi uses `UNION SELECT`, XSS uses `<script>`, etc.
+2. **Generalisation across encoding** — `sql_keyword_count` catches both `UNION SELECT` and `%55nion%20%53elect` (URL-encoded), because the extractor URL-decodes the input before pattern matching.
 3. **Efficiency** — 75 floats are computed in microseconds; raw-byte deep learning requires GPUs.
-4. **Explainability** — each feature has a human-readable name, enabling the "why was this blocked?" dashboard explanation.
-
-This philosophy exactly matches open-appsec's approach: they use a rich, manually-designed feature vocabulary that encodes web-security domain knowledge.
+4. **Explainability** — each feature has a human-readable name, enabling the "Why was this blocked?" detail modal in the dashboard.
 
 ---
 
-## Feature Categories
+## URL Decoding Before Pattern Matching
 
-### 1. Structural Features (8 features)
+A key design decision: the extractor URL-decodes (`unquote_plus`) the URL and body into a `full` string used for **all pattern matching**, while **structural features** (`url_length`, `pct_encoded`, `double_encoded`, etc.) still use the raw strings.
 
-Basic request anatomy. These alone can catch anomalies like abnormally long URLs or overly large bodies.
+This means `%27 OR %271%27=%271` is correctly recognised as a SQL tautology, while the raw encoding level is still captured in structural features.
 
-| Feature | Description |
-|---|---|
-| `url_length` | Total character length of the URL |
-| `url_param_count` | Number of `?key=value` pairs |
-| `body_length` | Byte length of request body |
-| `header_count` | Number of HTTP headers |
-| `path_depth` | Count of `/` segments in URL path |
-| `has_body` | 1 if body is non-empty |
-| `content_type_is_json` | 1 if Content-Type is application/json |
-| `content_type_is_xml` | 1 if Content-Type is text/xml |
+---
 
-### 2. Entropy Features (3 features)
+## Feature Groups (75 total)
 
-Shannon entropy measures the **randomness/compressibility** of a string. Encoded or obfuscated payloads have high entropy; normal English text has low entropy. This catches base64-encoded payloads, encrypted shellcode, and heavily obfuscated XSS.
-
-```
-H(X) = -Σ p(x) log₂ p(x)
-```
+### 1. URL Structural Features (7)
 
 | Feature | Description |
 |---|---|
-| `url_entropy` | Shannon entropy of the full URL string |
-| `body_entropy` | Shannon entropy of the request body |
-| `param_value_max_entropy` | Max entropy across all URL parameter values |
+| `url_length` | Raw URL character length (capped at 4000) |
+| `path_length` | Length of the URL path (before `?`) |
+| `query_length` | Length of the query string (after `?`) |
+| `url_depth` | Count of `/` in the URL path |
+| `num_params` | Number of `&`-delimited parameters in query |
+| `pct_encoded` | Count of `%` characters in raw URL |
+| `double_encoded` | Count of `%25` (double percent-encoding) in raw URL |
 
-### 3. Attack Pattern Count Features (40+ features)
+### 2. Special Character Features (7)
 
-For each attack category, we count the number of matches against a curated pattern library. The count (not just presence) captures severity — a URL with 5 SQL keywords is far more suspicious than one with 1.
-
-**SQL Injection** (features: `sql_keyword_count`, `union_detected`, `comment_pattern`, `blind_sqli_pattern`):
-```python
-SQL_KEYWORDS = ['select', 'union', 'insert', 'update', 'drop', 'exec', ...]
-```
-
-**XSS** (features: `xss_pattern_count`, `script_tag_count`, `event_handler_count`):
-```python
-XSS_PATTERNS = ['<script', 'javascript:', 'onerror=', 'alert(', ...]
-```
-
-**Path Traversal** (features: `path_traversal_count`, `absolute_path_detected`):
-```python
-PATH_TRAVERSAL_PATTERNS = ['../', '..\\', '.%2e', '%c0%ae', ...]
-```
-
-**Command Injection** (features: `cmd_injection_count`):
-```python
-CMD_INJECTION_PATTERNS = ['; ls', '| cat', '$(id)', '/bin/bash', ...]
-```
-
-**NoSQL Injection** (features: `nosql_operator_count`):
-```python
-NOSQL_PATTERNS = ['$where', '$ne', '$gt', '$regex', '[$ne]', ...]
-```
-
-**SSRF** (features: `ssrf_pattern_count`):
-Detects cloud metadata URLs (169.254.169.254), private IP ranges, and non-HTTP schemes (file://, gopher://).
-
-**XXE** (features: `xxe_pattern_count`):
-Detects `<!DOCTYPE`, `<!ENTITY SYSTEM`, and external entity references in XML bodies.
-
-**IDOR** (features: `idor_pattern_count`):
-Detects sequential integer IDs, UUIDs, and object reference manipulation patterns in URLs.
-
-### 4. Encoding Features (4 features)
-
-Attackers frequently encode payloads to bypass signature-based WAFs.
+Counted on the **decoded** `full` string (URL + body):
 
 | Feature | Description |
 |---|---|
-| `url_encoded_ratio` | Fraction of characters that are `%xx` sequences |
-| `double_encoded` | 1 if `%25` (double-percent encoding) found |
-| `base64_in_params` | 1 if any parameter value appears to be base64 |
-| `hex_encoded_chars` | Count of `\xNN` hex sequences |
+| `special_chars_url` | Count of `'";:<>()[]{}|&` `` ` `` `$\/%+#@!~^*` in raw URL |
+| `special_chars_body` | Same set counted in raw body |
+| `single_quotes` | Count of `'` in decoded full string |
+| `double_quotes` | Count of `"` in decoded full string |
+| `semicolons` | Count of `;` in decoded full string |
+| `comment_markers` | Combined count of `--`, `/*`, `#` |
+| `angle_brackets` | Combined count of `<` and `>` |
 
-### 5. Behavioral/Metadata Features (8 features)
+### 3. SQL Injection Features (7)
 
 | Feature | Description |
 |---|---|
-| `is_bot_ua` | 1 if User-Agent matches known scanner (sqlmap, nikto, dirbuster…) |
-| `missing_host_header` | 1 if Host header absent (abnormal for real browsers) |
-| `has_xforwardedfor` | 1 if X-Forwarded-For header present |
-| `method_is_unusual` | 1 for TRACE, CONNECT, OPTIONS (rarely legitimate) |
-| `has_suspicious_headers` | 1 if JNDI patterns in any header (Log4Shell) |
-| `param_pollution` | 1 if same parameter key appears multiple times |
-| `is_private_ip` | 1 if source IP is in RFC1918 range |
-| `body_has_script` | 1 if body contains HTML script tags |
+| `sql_keyword_count` | Count of SQL keywords matched (`select`, `union`, `drop`, `sleep(`, etc.) |
+| `has_union` | 1 if `union` present |
+| `has_select` | 1 if `select` present |
+| `has_drop` | 1 if `drop` present |
+| `sql_tautology` | 1 if pattern `'? OR/AND '?1'?='?1` matched |
+| `has_comment` | 1 if `--` or `/*` present |
+| `has_hex_encode` | 1 if `0x[0-9a-f]{2,}` pattern matched |
+
+SQL keywords list includes: `select`, `union`, `insert`, `update`, `delete`, `drop`, `create`, `exec`, `execute`, `xp_`, `sp_`, `information_schema`, `sys.`, `sysobjects`, `syscolumns`, `waitfor`, `delay`, `benchmark`, `sleep(`, `load_file`, `outfile`, `dumpfile`, `char(`, `ascii(`, `substring(`, `concat(`, `group_concat`, `having`, `order by`, `group by`, `1=1`, `or 1`, `and 1`, `sqlite_master`, `attach database`, `extractvalue`, `updatexml`.
+
+### 4. XSS Features (6)
+
+| Feature | Description |
+|---|---|
+| `xss_pattern_count` | Count of XSS patterns matched (see list below) |
+| `has_script_tag` | 1 if `<script` present |
+| `has_event_handler` | 1 if `on\w+=` regex matched (e.g. `onerror=`) |
+| `has_javascript_uri` | 1 if `javascript:` present |
+| `has_html_entity` | 1 if `&lt;`, `&gt;`, or `&#` present |
+| `has_template_injection` | 1 if `{{`, `${`, or `#{` present |
+
+XSS patterns include: `<script`, `</script>`, `javascript:`, `onerror=`, `onload=`, `onclick=`, `onmouseover=`, `onfocus=`, `onblur=`, `alert(`, `prompt(`, `confirm(`, `document.cookie`, `document.write`, `window.location`, `eval(`, `<img`, `<iframe`, `<object`, `<embed`, `<svg`, `vbscript:`, `expression(`, `fromcharcode`, `innerhtml`, `src=x`, `<marquee`, `onstart=`, `ontoggle=`, `constructor.constructor`, `{{`, `${`, `#{`.
+
+### 5. Path Traversal Features (4)
+
+| Feature | Description |
+|---|---|
+| `path_traversal_count` | Count of path traversal patterns matched |
+| `has_dotdot` | 1 if `../` in decoded string or `..` in raw path |
+| `has_etc_passwd` | 1 if `/etc/passwd` or `etc%2fpasswd` present |
+| `has_null_byte` | 1 if `%00` or null byte `\x00` present |
+
+Patterns: `../`, `..\`, `.%2e`, `%2e.`, `%2f..`, `..%5c`, `%252e`, `%c0%ae`, `..../`, `\./)`, `/etc/passwd`, `/etc/shadow`, `windows/system32`, `c:\windows`, `boot.ini`, `win.ini`, `/proc/self`, `php.ini`.
+
+### 6. Command Injection Features (4)
+
+| Feature | Description |
+|---|---|
+| `cmd_injection_count` | Count of command injection patterns matched |
+| `has_pipe` | 1 if `|` in decoded string |
+| `has_backtick` | 1 if `` ` `` in decoded string |
+| `has_dollar_paren` | 1 if `$(` in decoded string |
+
+Patterns: `; ls`, `; cat`, `| ls`, `| cat`, `&& ls`, `&& cat`, `` `ls` ``, `` `id` ``, `$(id)`, `$(ls)`, `; id`, `| id`, `; whoami`, `nc -`, `wget http`, `curl http`, `/bin/sh`, `/bin/bash`, `cmd.exe`, `powershell`, `; uname`, `ping -c`, `| nc`, `/tmp/shell`.
+
+### 7. NoSQL Injection Features (4)
+
+| Feature | Description |
+|---|---|
+| `nosql_operator_count` | Count of NoSQL operator patterns matched |
+| `has_nosql_where` | 1 if `$where` present |
+| `has_nosql_ne` | 1 if `$ne` or `[$ne]` present |
+| `has_nosql_regex` | 1 if `$regex` or `[$regex]` present |
+
+Patterns include MongoDB operators: `$where`, `$gt`, `$lt`, `$ne`, `$eq`, `$in`, `$nin`, `$regex`, `$exists`, `$or`, `$and`, `$not`, `$elemMatch`, `$all`, `$size`, `$type`, `mapreduce`, `findandmodify`, `_id`, `objectid(`, `[$ne]`, `[$gt]`, `[$regex]`, `[$where]`.
+
+### 8. SSRF Features (5)
+
+| Feature | Description |
+|---|---|
+| `ssrf_pattern_count` | Count of SSRF patterns matched |
+| `has_internal_ip` | 1 if `127.0.0.1`, `192.168.*`, `10.*`, or `172.16-31.*` present |
+| `has_aws_metadata` | 1 if `169.254.169.254` present |
+| `has_file_proto` | 1 if `file://` present |
+| `has_non_http_proto` | 1 if `dict://`, `gopher://`, `ldap://`, `ftp://`, or `sftp://` present |
+
+### 9. XXE Features (3)
+
+| Feature | Description |
+|---|---|
+| `xxe_pattern_count` | Count of XXE patterns matched |
+| `has_xml_doctype` | 1 if `<!doctype` or `<!entity` present |
+| `has_xml_declaration` | 1 if `<?xml` present |
+
+### 10. JWT Abuse Features (3)
+
+Evaluated on the `Authorization: Bearer <token>` header value:
+
+| Feature | Description |
+|---|---|
+| `has_jwt` | 1 if the bearer token decodes as a valid JWT (has `alg` in header) |
+| `jwt_alg_none` | 1 if JWT header has `alg: none` / `null` / empty |
+| `jwt_no_signature` | 1 if bearer token ends with `.` (missing signature segment) |
+
+### 11. IDOR Features (2)
+
+| Feature | Description |
+|---|---|
+| `has_idor_pattern` | 1 if URL path matches `/(users?|orders?|baskets?|payments?|...)/<id>` |
+| `path_has_int_id` | 1 if URL path contains a bare integer segment (`/123`) |
+
+### 12. HTTP Method Features (4)
+
+| Feature | Description |
+|---|---|
+| `method_encoded` | Numeric encoding: GET=0, POST=1, PUT=2, DELETE=3, OPTIONS=4, HEAD=5, PATCH=6, TRACE=7 |
+| `is_post` | 1 if method is POST |
+| `is_delete` | 1 if method is DELETE |
+| `is_trace` | 1 if method is TRACE |
+
+### 13. Body Features (6)
+
+| Feature | Description |
+|---|---|
+| `body_length` | Raw body length (capped at 50,000) |
+| `body_entropy` | Shannon entropy of first 500 body chars |
+| `body_has_base64` | 1 if base64-like sequence (`[A-Za-z0-9+/]{20,}={0,2}`) in body |
+| `body_has_xml` | 1 if `<?xml` or `<root>` in body |
+| `body_is_json` | 1 if body starts with `{` or `[` |
+| `body_has_json_operators` | 1 if `$\w+` pattern in body (NoSQL/JSON operator injection) |
+
+### 14. Header Features (7)
+
+| Feature | Description |
+|---|---|
+| `ua_length` | Length of User-Agent header |
+| `suspicious_ua` | 1 if UA contains known scanner string (sqlmap, nikto, nmap, burpsuite, etc.) |
+| `has_referer` | 1 if Referer header present |
+| `has_cookie` | 1 if Cookie header present |
+| `has_auth_header` | 1 if Authorization header present |
+| `has_content_type` | 1 if Content-Type header present |
+| `num_headers` | Total count of request headers |
+
+### 15. Entropy Features (3)
+
+| Feature | Description |
+|---|---|
+| `query_entropy` | Shannon entropy of query string (first 300 chars) |
+| `url_entropy` | Shannon entropy of full URL (first 300 chars) |
+| `body_token_entropy` | Shannon entropy of body with whitespace removed (first 300 chars) |
+
+High entropy indicates encoded/obfuscated payloads, base64 shellcode, or heavily randomized attack strings.
+
+### 16. Parameter Pollution Features (3)
+
+| Feature | Description |
+|---|---|
+| `duplicate_params` | 1 if any parameter key appears more than once in query |
+| `num_query_params` | Count of distinct parameter keys in query |
+| `max_param_value_length` | Length of the longest individual parameter value |
 
 ---
 
 ## Data Flow
 
 ```
-raw_request (dict)
-    │
-    ▼
-extract_features(request) → feature_dict (named floats)
-    │
-    ▼
-features_to_array(feature_dict) → numpy array [75 floats]
-    │
-    ▼
-Random Forest model → probability score (0.0–1.0)
+raw request dict {method, url, headers, body, ip}
+        │
+        ▼
+extract_features(request_data)
+  ├─ URL-decode url + body → full (for pattern matching)
+  ├─ Keep raw url/path/query (for structural features)
+  └─ Returns feature_dict {name: float, ...}  (75 entries)
+        │
+        ▼
+features_to_array(feature_dict)
+  └─ Returns np.ndarray shape=(75,) dtype=float32  (canonical FEATURE_NAMES order)
+        │
+        ▼
+model.predict_proba(arr.reshape(1,-1))[0][1]
+  └─ Returns malicious probability score 0.0–1.0
 ```
 
-The `FEATURE_NAMES` constant exports the ordered list of feature names, which is also stored in `models/metrics.json` to enable feature importance display in the dashboard.
+`FEATURE_NAMES` is defined by calling `extract_features` once on a dummy request at import time and taking the resulting dict keys — this guarantees the training and inference order are always identical.
 
 ---
 
@@ -140,12 +231,13 @@ The `FEATURE_NAMES` constant exports the ordered list of feature names, which is
 | File | Relationship |
 |---|---|
 | `ml/train.py` | Calls `extract_features()` + `features_to_array()` for every training sample |
-| `app/waf_engine.py` | Calls `extract_features()` + `features_to_array()` at Stage 8 for every live request |
+| `app/waf_engine.py` | Calls them at Stage 8 (supervised ML) for every live request; also uses `features` for `_infer_attack_type()` in earlier stages |
 | `ml/dataset_generator.py` | Provides the training requests that `train.py` feeds to this module |
-| `static/index.html` | Displays `ev.features` dict (returned from `waf_engine.analyze`) in the detail modal |
+| `static/index.html` | Displays `result.features` dict in the per-event detail modal |
+| `models/metrics.json` | Stores `feature_names` and `feature_importances` for the dashboard ML tab |
 
 ---
 
 ## open-appsec Equivalent
 
-open-appsec uses a proprietary feature vocabulary of 100+ features, kept confidential. Based on their published papers and the nginx-attachment repo, the feature categories are very similar to this implementation: structural, entropy, pattern-count, and behavioral. The main difference is that open-appsec computes features in C++ for microsecond latency, while this Python implementation takes ~1–5ms per request.
+open-appsec uses a proprietary feature vocabulary of 100+ features, kept confidential. Based on published papers and the nginx-attachment source, the feature categories are very similar: structural, entropy, pattern-count, and behavioral. The main difference is that open-appsec computes features in C++ for microsecond latency, while this Python implementation takes ~1–5ms per request.
