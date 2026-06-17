@@ -205,6 +205,16 @@ HTTP_PARAMS_FUZZING = [
     # HPP - HTTP Parameter Pollution
     "color=red&color=blue&color=<script>alert(1)</script>",
     "token=abc&token=def&token=../../../../etc/passwd",
+    # Mass assignment / privilege escalation via duplicate keys
+    "role=user&role=admin", "isAdmin=false&isAdmin=true",
+    "price=100&price=0", "discount=0&discount=100",
+    "quantity=1&quantity=-1", "user_id=5&user_id=1",
+    # Array-style duplicate params (PHP/Rails convention abuse)
+    "filter[status]=active&filter[status]=deleted",
+    "ids[]=1&ids[]=2&ids[]=3&ids[]=../../../etc/passwd",
+    # Mixed-type confusion (string vs array vs object)
+    "amount=10&amount[]=10&amount[$gt]=0",
+    "search=test&search[0]=' OR 1=1--",
 ]
 
 # ── XSS Payloads ─────────────────────────────────────────────────────────────
@@ -362,6 +372,13 @@ IDOR_PATHS = [
     '/api/deliverys/1', '/api/deliverys/2',
     '/profile?id=1', '/profile?id=2', '/profile?id=../admin',
     '/api/users/1', '/api/users/2', '/api/users/3',
+    '/api/invoices/1', '/api/invoices/2', '/api/invoices/100',
+    '/api/documents/1', '/api/documents/55', '/api/files/1',
+    '/api/messages/1', '/api/messages/2', '/api/conversations/1',
+    '/api/accounts/1/transactions', '/api/accounts/2/transactions',
+    '/api/tickets/1', '/api/tickets/2', '/api/reports/1',
+    '/download?file_id=1', '/download?file_id=2',
+    '/api/users/1/settings', '/api/users/2/settings',
 ]
 
 # ── SSRF (Server-Side Request Forgery) ───────────────────────────────────────
@@ -758,9 +775,9 @@ def generate_dataset(
     # OWASP Juice Shop
     n_juice_sqli: int = 600,
     n_juice_xss: int = 600,
-    n_idor: int = 500,
+    n_idor: int = 1500,
     # HTTPParams fuzzing
-    n_http_params: int = 500,
+    n_http_params: int = 1500,
     # New attack types
     n_nosql: int = 400,
     n_jwt_abuse: int = 300,
