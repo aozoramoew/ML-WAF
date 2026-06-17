@@ -21,7 +21,7 @@ openappsec's architecture reasonably closely:
 - `app/waf_engine.py` — 10-stage pipeline (rate limiter → anti-bot → crowd wisdom →
   IPS signatures → file security → NoSQL → JWT → supervised ML → unsupervised ML →
   API discovery), mirroring openappsec's "preemptive + ML" model.
-- `ml/feature_extractor.py` + `ml/train.py` — 75-feature extractor, trains
+- `ml/feature_extractor.py` + `ml/train.py` — 74-feature extractor, trains
   RandomForest / GradientBoosting, saves `models/waf_model.pkl` + `models/metrics.json`.
 - `ml/unsupervised.py` — Isolation Forest baseline that "learns" normal traffic
   (mirrors openappsec's per-asset behavioral model).

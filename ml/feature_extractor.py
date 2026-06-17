@@ -149,7 +149,7 @@ def _jwt_alg_none(value: str) -> bool:
 
 def extract_features(request_data: Dict[str, Any]) -> Dict[str, float]:
     """
-    Extract 75 ML-ready features from an HTTP request dictionary.
+    Extract 74 ML-ready features from an HTTP request dictionary.
 
     Expected keys: method, url, headers (dict), body, ip
     """
@@ -277,7 +277,12 @@ def extract_features(request_data: Dict[str, Any]) -> Dict[str, float]:
     f['has_cookie'] = float('cookie' in headers)
     f['has_auth_header'] = float('authorization' in headers)
     f['has_content_type'] = float('content-type' in headers)
-    f['num_headers'] = float(len(headers))
+    # num_headers intentionally omitted: in CSIC 2010 it takes only two values
+    # (10 for GET, 12 for POST) and is purely a proxy for HTTP method, which
+    # is already captured by method_encoded/is_post. Real deployments behind
+    # a reverse proxy (Railway, nginx, Cloudflare) add 5-10 extra headers
+    # per request regardless of payload, making this an out-of-distribution
+    # trap rather than a security signal.
 
     # ── Entropy features ─────────────────────────────────────────────
     f['query_entropy'] = _entropy(query[:300])

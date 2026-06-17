@@ -441,6 +441,29 @@ def _rand_session():
     return ''.join(random.choices(string.hexdigits, k=32))  # nosec B311
 
 
+def _proxy_chain_headers(host: str = 'app.example.com') -> dict:
+    """Headers a reverse proxy / PaaS edge (Railway, Heroku, nginx) adds on
+    top of the original browser headers. Real production traffic almost
+    always carries these, so the synthetic distribution must include them
+    too — otherwise num_headers alone becomes an out-of-distribution signal
+    the model has never seen for either class."""
+    ip = _rand_ip()
+    pool = {
+        'X-Forwarded-For': f'{ip}, {_rand_ip()}',
+        'X-Forwarded-Host': host,
+        'X-Forwarded-Proto': 'https',
+        'X-Real-IP': ip,
+        'X-Request-Start': str(random.randint(1_700_000_000_000, 1_800_000_000_000)),  # nosec B311
+        'X-Railway-Edge': f'railway/{random.choice(["us-east4-eqdc4a", "us-west1-abc", "eu-west1-xyz"])}',  # nosec B311
+        'X-Railway-Request-Id': _rand_str(22),
+        'X-Hikari-Routed': '1',
+    }
+    keys = list(pool.keys())
+    random.shuffle(keys)  # nosec B311
+    n = random.randint(0, len(keys))  # nosec B311
+    return {k: pool[k] for k in keys[:n]}
+
+
 def _normal_headers(json_body=False):
     h = {
         'User-Agent': random.choice(NORMAL_UAS),  # nosec B311
@@ -451,7 +474,8 @@ def _normal_headers(json_body=False):
         h['Referer'] = f'http://localhost{random.choice(NORMAL_PATHS)}'  # nosec B311
     if random.random() > 0.3:  # nosec B311
         h['Cookie'] = f'JSESSIONID={_rand_session()}'
-        
+    h.update(_proxy_chain_headers())
+
     if json_body:
         h['Content-Type'] = 'application/json'
     return h

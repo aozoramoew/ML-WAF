@@ -2,7 +2,7 @@
 
 ## Overview
 
-`feature_extractor.py` converts a raw HTTP request dictionary into a **fixed-length 75-dimensional float32 feature vector** that the Random Forest (or Gradient Boosting) classifier operates on.
+`feature_extractor.py` converts a raw HTTP request dictionary into a **fixed-length 74-dimensional float32 feature vector** that the Random Forest (or Gradient Boosting) classifier operates on.
 
 The core function is `extract_features(request_data)` which returns a named dict of floats. `features_to_array(feature_dict)` then converts it to a numpy array in the stable canonical order defined by `FEATURE_NAMES`.
 
@@ -14,7 +14,7 @@ A neural network could theoretically operate on raw bytes. But for a WAF use cas
 
 1. **Attack patterns are known** — SQLi uses `UNION SELECT`, XSS uses `<script>`, etc.
 2. **Generalisation across encoding** — `sql_keyword_count` catches both `UNION SELECT` and `%55nion%20%53elect` (URL-encoded), because the extractor URL-decodes the input before pattern matching.
-3. **Efficiency** — 75 floats are computed in microseconds; raw-byte deep learning requires GPUs.
+3. **Efficiency** — 74 floats are computed in microseconds; raw-byte deep learning requires GPUs.
 4. **Explainability** — each feature has a human-readable name, enabling the "Why was this blocked?" detail modal in the dashboard.
 
 ---
@@ -27,7 +27,7 @@ This means `%27 OR %271%27=%271` is correctly recognised as a SQL tautology, whi
 
 ---
 
-## Feature Groups (75 total)
+## Feature Groups (74 total)
 
 ### 1. URL Structural Features (7)
 
@@ -170,7 +170,7 @@ Evaluated on the `Authorization: Bearer <token>` header value:
 | `body_is_json` | 1 if body starts with `{` or `[` |
 | `body_has_json_operators` | 1 if `$\w+` pattern in body (NoSQL/JSON operator injection) |
 
-### 14. Header Features (7)
+### 14. Header Features (6)
 
 | Feature | Description |
 |---|---|
@@ -180,7 +180,8 @@ Evaluated on the `Authorization: Bearer <token>` header value:
 | `has_cookie` | 1 if Cookie header present |
 | `has_auth_header` | 1 if Authorization header present |
 | `has_content_type` | 1 if Content-Type header present |
-| `num_headers` | Total count of request headers |
+
+`num_headers` (total header count) was deliberately removed from the feature set. In the CSIC 2010 corpus it takes only two values — 10 for GET, 12 for POST — making it a pure proxy for HTTP method (already captured by `method_encoded`/`is_post`) rather than a security signal. Production traffic behind a reverse proxy (Railway, nginx, Cloudflare) adds 5–10 extra headers per request regardless of payload, which pushed real requests outside the training distribution and caused the model to block legitimate traffic purely for carrying many headers.
 
 ### 15. Entropy Features (3)
 
@@ -211,11 +212,11 @@ raw request dict {method, url, headers, body, ip}
 extract_features(request_data)
   ├─ URL-decode url + body → full (for pattern matching)
   ├─ Keep raw url/path/query (for structural features)
-  └─ Returns feature_dict {name: float, ...}  (75 entries)
+  └─ Returns feature_dict {name: float, ...}  (74 entries)
         │
         ▼
 features_to_array(feature_dict)
-  └─ Returns np.ndarray shape=(75,) dtype=float32  (canonical FEATURE_NAMES order)
+  └─ Returns np.ndarray shape=(74,) dtype=float32  (canonical FEATURE_NAMES order)
         │
         ▼
 model.predict_proba(arr.reshape(1,-1))[0][1]

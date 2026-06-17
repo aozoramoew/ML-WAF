@@ -104,7 +104,7 @@ Browser / Client
 │             app/waf_engine.py  (Pipeline)                 │
 │                                                          │
 │  Stage 0  ── Policy check           app/policy.py        │
-│  [Feature extraction — 75-dim vector computed here]      │
+│  [Feature extraction — 74-dim vector computed here]      │
 │  Stage 1  ── Rate Limiter           rate_limiter.py       │
 │  Stage 2  ── Anti-Bot               anti_bot.py          │
 │  Stage 3  ── Crowd Wisdom           crowd_wisdom.py       │
@@ -127,12 +127,12 @@ Browser / Client
 
 ### 3.2 The Request Pipeline
 
-The pipeline consists of 10 numbered stages. Stages 1–7 are deterministic rule-based modules; Stages 8–9 are ML inference stages; Stage 10 is a passive recording module. The feature extraction step is executed once, immediately after Stage 0 (policy check), and the resulting 75-dimensional feature vector is shared across all subsequent stages.
+The pipeline consists of 10 numbered stages. Stages 1–7 are deterministic rule-based modules; Stages 8–9 are ML inference stages; Stage 10 is a passive recording module. The feature extraction step is executed once, immediately after Stage 0 (policy check), and the resulting 74-dimensional feature vector is shared across all subsequent stages.
 
 | Stage | Module | Detection Mechanism | Blocking |
 |-------|--------|---------------------|----------|
 | 0 | Policy | IP allowlist / blocklist; path allowlist / blocklist | Yes |
-| — | Feature Extraction | HTTP request → 75-dim float vector | No |
+| — | Feature Extraction | HTTP request → 74-dim float vector | No |
 | 1 | Rate Limiter | Sliding-window request count per IP | Yes |
 | 2 | Anti-Bot | User-Agent fingerprinting; request velocity | Yes |
 | 3 | Crowd Wisdom | IP reputation; offline CIDR blocklist; live threat feed | Yes |
@@ -176,7 +176,7 @@ The system operates two ML models in series that address complementary threat cl
 
 ### 4.2 Short-Circuit Evaluation for Computational Efficiency
 
-Rule-based stages are ordered by computational cost: token-bucket counting (Stage 1) executes in O(1); regex matching (Stage 4) in O(signature_count × request_length); ML inference (Stages 8–9) requires matrix operations over 75 features. The short-circuit design ensures that the average per-request cost is dominated by the cheap pre-filter stages for the majority of traffic, reserving ML inference for ambiguous cases.
+Rule-based stages are ordered by computational cost: token-bucket counting (Stage 1) executes in O(1); regex matching (Stage 4) in O(signature_count × request_length); ML inference (Stages 8–9) requires matrix operations over 74 features. The short-circuit design ensures that the average per-request cost is dominated by the cheap pre-filter stages for the majority of traffic, reserving ML inference for ambiguous cases.
 
 ### 4.3 Confidence Fusion
 
@@ -198,7 +198,7 @@ The trained supervised model (`models/waf_model.pkl`) is loaded on first inferen
 
 ### 4.6 Built-In Explainability
 
-Every decision result includes the complete 75-element feature vector. The dashboard renders a per-request feature importance view using the model's `feature_importances_` attribute, enabling operators to identify which specific signals — e.g., elevated `sql_keyword_count`, presence of `has_union`, or high `body_entropy` — drove a particular blocking decision. This transparency is architecturally significant: it transforms the ML layer from an opaque classifier into an auditable decision component.
+Every decision result includes the complete 74-element feature vector. The dashboard renders a per-request feature importance view using the model's `feature_importances_` attribute, enabling operators to identify which specific signals — e.g., elevated `sql_keyword_count`, presence of `has_union`, or high `body_entropy` — drove a particular blocking decision. This transparency is architecturally significant: it transforms the ML layer from an opaque classifier into an auditable decision component.
 
 ---
 
@@ -265,7 +265,7 @@ Training runs in a FastAPI background thread (not a coroutine), isolating the bl
 
 The `analyze(request_data)` function:
 1. Executes Stage 0 (policy check).
-2. Calls `feature_extractor.extract_features(request_data)` and `features_to_array(f)`, producing a 75-element `np.float32` array.
+2. Calls `feature_extractor.extract_features(request_data)` and `features_to_array(f)`, producing a 74-element `np.float32` array.
 3. Iterates through Stages 1–10, passing both the raw `request_data` dict and the pre-computed feature vector to each stage function.
 4. Returns on the first blocking result; otherwise returns the allow result from Stage 10.
 
@@ -444,9 +444,9 @@ The JWT module extracts tokens from the `Authorization: Bearer` header or from c
 
 ### 8.1 Feature Extraction (`ml/feature_extractor.py`)
 
-The feature extractor transforms an HTTP request dictionary into a fixed-length 75-dimensional `float32` vector. All URL-decoded forms of the URL, query string, and body are computed before pattern matching, preventing encoding-based evasion (e.g., `%27 OR 1=1` evading a pattern matching the literal single-quote character).
+The feature extractor transforms an HTTP request dictionary into a fixed-length 74-dimensional `float32` vector. All URL-decoded forms of the URL, query string, and body are computed before pattern matching, preventing encoding-based evasion (e.g., `%27 OR 1=1` evading a pattern matching the literal single-quote character).
 
-The 75 features are organized into 16 groups:
+The 74 features are organized into 16 groups:
 
 | Group | Count | Representative Features |
 |-------|-------|------------------------|
@@ -463,11 +463,13 @@ The 75 features are organized into 16 groups:
 | IDOR | 2 | `has_idor_pattern`, `path_has_int_id` |
 | HTTP Method | 4 | `method_encoded`, `is_post`, `is_delete`, `is_trace` |
 | Body | 6 | `body_length`, `body_entropy`, `body_has_base64`, `body_has_xml`, `body_is_json`, `body_has_json_operators` |
-| Headers | 7 | `ua_length`, `suspicious_ua`, `has_referer`, `has_cookie`, `has_auth_header`, `has_content_type`, `num_headers` |
+| Headers | 6 | `ua_length`, `suspicious_ua`, `has_referer`, `has_cookie`, `has_auth_header`, `has_content_type` |
 | Entropy | 3 | `query_entropy`, `url_entropy`, `body_token_entropy` |
 | Parameter Pollution | 3 | `duplicate_params`, `num_query_params`, `max_param_value_length` |
 
-**Total: 7+7+7+6+4+4+4+5+3+3+2+4+6+7+3+3 = 75.**
+**Total: 7+7+7+6+4+4+4+5+3+3+2+4+6+6+3+3 = 74.**
+
+`num_headers` (total header count) was removed from the feature set after production deployment revealed a critical data leakage artifact: in the CSIC 2010 corpus, this feature took only two discrete values — 10 for GET requests and 12 for POST requests — making it a pure proxy for HTTP method (already captured by `method_encoded`/`is_post`) rather than a genuine security signal. Real-world deployments behind a reverse proxy (Railway, nginx, Cloudflare) append 5–10 additional headers (`X-Forwarded-For`, `X-Real-IP`, platform-specific tracing headers) to every request regardless of payload content, pushing legitimate production traffic outside the training distribution and causing the model to block benign requests purely for carrying many headers.
 
 ### 8.2 Synthetic Dataset Generation (`ml/dataset_generator.py`)
 
@@ -509,7 +511,7 @@ The training procedure:
 
 1. **Data loading**: loads real CSIC 2010 files auto-detected from `data/` (`cisc_normalTraffic_train.txt`, `cisc_normalTraffic_test.txt`, `cisc_anomalousTraffic_test.txt`), the synthetic dataset from `generate_dataset()`, and any site-specific labeled data from `data/custom_labeled.jsonl`. Deduplication logic prevents double-counting if both raw CSIC filenames and their renamed `cisc_*` copies are present.
 
-2. **Feature extraction**: each request is passed through `extract_features()` and `features_to_array()`, producing a matrix of shape `(N, 75)`.
+2. **Feature extraction**: each request is passed through `extract_features()` and `features_to_array()`, producing a matrix of shape `(N, 74)`.
 
 3. **Train/test split**: stratified 80/20 split (`test_size=0.2`, `random_state=42`, `stratify=y`).
 
@@ -636,7 +638,7 @@ The simulator enables demonstration and validation of WAF behavior without requi
 The dashboard is a zero-build-step SPA served directly by FastAPI from `GET /`. It maintains a persistent WebSocket connection to `/ws` and updates all displayed data in real time as `request` and `stats_update` messages arrive. UI sections include:
 
 - **Overview**: live request counters, traffic time-series (Chart.js), block-rate gauge, attack-type distribution donut chart.
-- **Live Events**: real-time scrolling event table with per-row expansion showing all 75 feature values, blocking stage, and feature importance ranking for the decision.
+- **Live Events**: real-time scrolling event table with per-row expansion showing all 74 feature values, blocking stage, and feature importance ranking for the decision.
 - **ML Models**: model performance metrics (`accuracy`, `precision`, `recall`, `F1`, `AUC`); dynamic dataset breakdown rendered from `metrics.json`'s `attack_distribution` field; feature importance bar chart; retrain button; labeled data upload form.
 - **Modules**: per-stage toggle controls for enabling/disabling individual pipeline stages.
 - **API Discovery**: auto-populated endpoint inventory with schema anomaly flags.
@@ -759,7 +761,7 @@ ML-WAF reproduces the conceptual architecture of open-appsec at study scale. The
 | Core language | C++ (engine), Go (management) | Python |
 | Supervised model | Global crowd-sourced corpus; algorithm undisclosed | GradientBoostingClassifier trained on CSIC 2010 + synthetic; ~110,865 samples |
 | Unsupervised model | Real-time contextual model; algorithm undisclosed | scikit-learn IsolationForest; 3-component fusion score |
-| Feature engineering | Proprietary; 100+ features | 75 hand-engineered features across 16 groups |
+| Feature engineering | Proprietary; 100+ features | 74 hand-engineered features across 16 groups |
 | Model selection | Internal; not exposed | Competitive training: RF vs. GB; selected by AUC |
 | Policy format | YAML / Kubernetes CRDs | JSON / REST |
 | Operating modes | Detect / Prevent (with learning phase) | Prevent / Detect / Monitor |
@@ -799,7 +801,7 @@ The Isolation Forest baseline requires a minimum of 200 allowed requests before 
 
 ### 14.6 Python Runtime Latency
 
-Feature extraction and model inference require O(1–5) ms per request in CPython, compared to O(1–10) μs for equivalent operations in a compiled language implementation. While acceptable for demonstrating functional correctness, this latency budget would be prohibitive in high-throughput production deployments (> 10,000 RPS). Critical paths (feature extraction, the 75-element array construction) would benefit from Cython, NumPy-vectorized batch processing, or a compiled extension module.
+Feature extraction and model inference require O(1–5) ms per request in CPython, compared to O(1–10) μs for equivalent operations in a compiled language implementation. While acceptable for demonstrating functional correctness, this latency budget would be prohibitive in high-throughput production deployments (> 10,000 RPS). Critical paths (feature extraction, the 74-element array construction) would benefit from Cython, NumPy-vectorized batch processing, or a compiled extension module.
 
 ---
 
@@ -835,6 +837,6 @@ Moving the feature extraction hot path into a NumPy-vectorized implementation or
 
 ML-WAF implements a complete, working Web Application Firewall that reproduces the dual-model preemptive architecture of open-appsec in a single, transparent Python service. Each HTTP request traverses a 10-stage pipeline combining seven deterministic rule-based detection modules with a supervised Gradient Boosting classifier and an online-learning Isolation Forest anomaly detector, all governed by a runtime-configurable policy engine.
 
-The supervised model, trained on a corpus of 110,865 samples comprising real CSIC 2010 HTTP traffic and 13,800 synthetic attack records, achieves AUC-ROC 0.9968, accuracy 97.33%, and precision 98.78% on the held-out test set. The feature engineering approach — 75 hand-selected features spanning structural, entropy, injection-pattern, and behavioral dimensions — provides interpretability: every blocking decision is traceable to specific feature values and the pipeline stage that generated the block.
+The supervised model, trained on a corpus of 110,865 samples comprising real CSIC 2010 HTTP traffic and 13,800 synthetic attack records, achieves AUC-ROC 0.9968, accuracy 97.33%, and precision 98.78% on the held-out test set. The feature engineering approach — 74 hand-selected features spanning structural, entropy, injection-pattern, and behavioral dimensions — provides interpretability: every blocking decision is traceable to specific feature values and the pipeline stage that generated the block.
 
 The implementation demonstrates that the core concepts of ML-based WAF design — supervised pre-training on labeled corpora, unsupervised per-deployment behavioral profiling, short-circuit evaluation for efficiency, and policy-driven threshold control — can be realized in a readable, self-contained codebase that exposes each design decision transparently. The limitations identified (synthetic data distribution, single global policy, IP-based rate limiting, Python latency) establish a concrete roadmap toward a production-grade implementation following the future work directions described above.

@@ -36,7 +36,7 @@ Real CSIC 2010 files are preferred over synthetic-only training. When both a raw
      d. Custom uploaded labeled data (data/custom_labeled.jsonl)
 
 3. Feature extraction
-   For each request → feature_extractor.extract_features() → 75-dim float32 vector
+   For each request → feature_extractor.extract_features() → 74-dim float32 vector
 
 4. Train/test split (80/20, stratified by label)
 
@@ -127,7 +127,7 @@ Best model: Gradient Boosting  (AUC=0.9968)
   "auc": 0.9968,
   "n_train": 88692,
   "n_test": 22174,
-  "n_features": 75,
+  "n_features": 74,
   "feature_names": ["url_length", "path_length", ...],
   "feature_importances": {
     "sql_keyword_count": 0.089,

@@ -128,7 +128,7 @@ ML-WAF/
 │       ├── nosql_injection.py  # MongoDB operator injection detection
 │       └── jwt_abuse.py     # JWT tampering and alg:none detection
 ├── ml/
-│   ├── feature_extractor.py # HTTP request → 75-feature numerical vector
+│   ├── feature_extractor.py # HTTP request → 74-feature numerical vector
 │   ├── train.py             # Model training (RF vs GradientBoosting, selects best by AUC)
 │   ├── dataset_generator.py # Synthetic dataset generator (13 categories, ~13,800 samples)
 │   └── unsupervised.py      # Isolation Forest baseline learner (online, per-environment)
@@ -228,7 +228,7 @@ open http://localhost:8090/waf-dashboard/
 ### Request Evaluation Flow
 
 1. A request arrives at `POST /analyze` or `ANY /waf_check`.
-2. `waf_engine.analyze()` runs the policy check (Stage 0), then extracts the 75-feature vector.
+2. `waf_engine.analyze()` runs the policy check (Stage 0), then extracts the 74-feature vector.
 3. Stages 1–7 are rule-based (rate limiter, bot detection, IPS signatures, etc.). Any block short-circuits the pipeline.
 4. Stage 8: the trained classifier scores the feature vector → probability 0–1. Block if `ml_score >= ml_block_score` (from policy).
 5. Stage 9: the Isolation Forest scores anomaly vs. learned baseline. If anomalous, the fused score `0.7×ml + 0.3×anomaly` is checked against `combined_block_score`.
@@ -237,7 +237,7 @@ open http://localhost:8090/waf-dashboard/
 
 ### ML Feature Engineering
 
-The 75-feature vector captures:
+The 74-feature vector captures:
 - **Structural**: URL length, path depth, query parameter count, body length
 - **Entropy**: Shannon entropy of URL, body, query (high entropy = encoded/obfuscated payload)
 - **SQL Injection**: keyword count, UNION/SELECT/DROP presence, tautology pattern, hex encoding
@@ -248,7 +248,7 @@ The 75-feature vector captures:
 - **SSRF**: internal IP, cloud metadata URL, non-HTTP protocols
 - **XXE**: XML DOCTYPE/ENTITY declarations
 - **JWT Abuse**: alg:none detection, missing signature segment
-- **Behavioral**: bot User-Agent, header counts, parameter pollution
+- **Behavioral**: bot User-Agent, header presence flags, parameter pollution
 
 ---
 
@@ -349,7 +349,7 @@ Each source file has a companion markdown document:
 | Concept | open-appsec | This project |
 |---|---|---|
 | Language | C++ (engine) + Go (management) | Python |
-| Feature engineering | Proprietary 100+ features | 75 engineered features |
+| Feature engineering | Proprietary 100+ features | 74 engineered features |
 | Supervised model | Global crowd-sourced training | Local training on CSIC 2010 + synthetic |
 | Best model selection | Internal | RF vs. GradientBoosting, chosen by AUC |
 | Policy engine | YAML/REST | JSON/REST |
