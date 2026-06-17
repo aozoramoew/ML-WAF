@@ -153,12 +153,20 @@ def extract_features(request_data: Dict[str, Any]) -> Dict[str, float]:
 
     Expected keys: method, url, headers (dict), body, ip
     """
-    url = str(request_data.get('url', ''))
+    raw_url = str(request_data.get('url', ''))
     method = str(request_data.get('method', 'GET')).upper()
     raw_headers = request_data.get('headers', {}) or {}
     headers = {k.lower(): str(v) for k, v in raw_headers.items()}
     body = str(request_data.get('body', '') or '')
     ip = str(request_data.get('ip', ''))
+
+    # Strip scheme + host so structural/entropy features describe the
+    # request itself, not the deployment's hostname. A request forwarded
+    # with a full URL (https://random-paas-host.example.com/login) must
+    # score identically to the same request sent as a bare path (/login) —
+    # otherwise the model keys off hostname length/entropy instead of the
+    # actual path, query, and payload content.
+    url = re.sub(r'^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]+', '', raw_url) or '/'
 
     path = url.split('?', 1)[0]
     query = url.split('?', 1)[1] if '?' in url else ''
