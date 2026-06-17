@@ -707,7 +707,7 @@ def _gen_xss() -> Dict:
 
     return {
         'method': method, 'url': url,
-        'headers': {'User-Agent': random.choice(NORMAL_UAS)},  # nosec B311
+        'headers': _attack_headers(),
         'body': body, 'ip': _rand_ip(), 'label': 1, 'attack_type': 'xss',
     }
 
@@ -721,7 +721,7 @@ def _gen_path_traversal() -> Dict:
 
     return {
         'method': 'GET', 'url': url,
-        'headers': {'User-Agent': random.choice(NORMAL_UAS)},  # nosec B311
+        'headers': _attack_headers(),
         'body': '', 'ip': _rand_ip(), 'label': 1, 'attack_type': 'path_traversal',
     }
 
@@ -741,7 +741,7 @@ def _gen_cmd_injection() -> Dict:
 
     return {
         'method': method, 'url': url,
-        'headers': {'User-Agent': random.choice(NORMAL_UAS)},  # nosec B311
+        'headers': _attack_headers(),
         'body': body, 'ip': _rand_ip(), 'label': 1, 'attack_type': 'cmd_injection',
     }
 
