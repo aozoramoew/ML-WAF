@@ -369,7 +369,7 @@ pre{padding:18px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-hei
 
       <!-- ═══ ML MODELS ═══ -->
       <div class="tab-panel" id="tab-ml">
-        <div class="section-h">🤖 Supervised Model — Random Forest</div>
+        <div class="section-h">🤖 Supervised Model — <span id="ml-section-model-name">—</span></div>
         <div class="met-grid" id="ml-metrics">
           <div class="met-chip"><div class="met-v" id="m-acc">—</div><div class="met-l">Accuracy</div></div>
           <div class="met-chip"><div class="met-v" id="m-prec">—</div><div class="met-l">Precision</div></div>
@@ -871,6 +871,7 @@ async function loadML() {
     el('m-rec').textContent=pct(d.recall);   el('m-f1').textContent=pct(d.f1);
     el('m-auc').textContent=d.auc!=null?d.auc.toFixed(4):'—';
     el('ml-model-name').textContent=d.model_name||'—'; el('ml-n-feat').textContent=d.n_features||'—';
+    el('ml-section-model-name').textContent=d.model_name||'—';
     el('ml-n-train').textContent=(d.n_train||0).toLocaleString(); el('ml-n-test').textContent=(d.n_test||0).toLocaleString();
     // Build dataset tags from attack_distribution + metadata
     const dist=d.attack_distribution||{};

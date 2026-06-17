@@ -41,12 +41,12 @@ ml-waf/
 models/waf_model.pkl
 models/unsupervised_baseline.pkl
 
-# ── Datasets (download separately — see .env.example) ────────────────────────
-data/normalTrafficTraining.txt
-data/anomalousTrafficTest.txt
-data/*.txt
+# ── Datasets ───────────────────────────────────────────────────────────────
+# CSIC 2010 .txt files (~75 MB total) ARE committed — Railway has no other
+# way to access them at build time, and they're under GitHub's 100 MB limit.
 data/*.csv
 data/*.arff
+data/custom_labeled.jsonl
 
 # ── IDE / editor ─────────────────────────────────────────────────────────────
 .vscode/
