@@ -113,13 +113,13 @@ def train_models(X_train, X_test, y_train, y_test):
 
     candidates = {
         'Random Forest': RandomForestClassifier(
-            n_estimators=300, max_depth=None, min_samples_split=2,
-            min_samples_leaf=1, max_features='sqrt',
+            n_estimators=300, max_depth=12, min_samples_split=10,
+            min_samples_leaf=5, max_features='sqrt',
             n_jobs=-1, random_state=42, class_weight='balanced',
         ),
         'Gradient Boosting': GradientBoostingClassifier(
-            n_estimators=200, max_depth=6, learning_rate=0.1,
-            subsample=0.8, random_state=42,
+            n_estimators=200, max_depth=4, learning_rate=0.1,
+            min_samples_leaf=5, subsample=0.8, random_state=42,
         ),
     }
 
@@ -130,11 +130,13 @@ def train_models(X_train, X_test, y_train, y_test):
 
         y_pred = clf.predict(X_test)
         y_prob = clf.predict_proba(X_test)[:, 1]
+        train_acc = float(clf.score(X_train, y_train))
 
         prec, rec, f1, _ = precision_recall_fscore_support(y_test, y_pred, average='binary')
         acc = float((y_pred == y_test).mean())
         auc = roc_auc_score(y_test, y_prob)
 
+        print(f"  Train Accuracy : {train_acc:.4f}  (vs. Test below — large gap = overfitting)")
         print(f"  Accuracy : {acc:.4f}")
         print(f"  Precision: {prec:.4f}")
         print(f"  Recall   : {rec:.4f}")

@@ -749,7 +749,7 @@ def _gen_cmd_injection() -> Dict:
 # ── Main generator ────────────────────────────────────────────────────────────
 def generate_dataset(
     n_normal: int = 6000,
-    n_modern_normal: int = 1500,
+    n_modern_normal: int = 4000,
     # CSIC 2010 style
     n_sqli: int = 1500,
     n_xss: int = 1500,
